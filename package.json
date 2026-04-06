@@ -8,28 +8,34 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src/"
+    "lint": "eslint src/",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.7",
+    "chroma-js": "^3.1.2",
+    "gsap": "^3.14.2",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "zustand": "^5.0.5",
-    "chroma-js": "^3.1.2",
-    "@phosphor-icons/react": "^2.1.7",
-    "gsap": "^3.12.7"
+    "zustand": "^5.0.5"
   },
   "devDependencies": {
-    "typescript": "^5.8.3",
+    "@crxjs/vite-plugin": "^2.0.0-beta.33",
+    "@tailwindcss/vite": "^4.1.4",
+    "@types/chroma-js": "^2.4.4",
+    "@types/chrome": "^0.0.304",
     "@types/react": "^19.1.2",
     "@types/react-dom": "^19.1.2",
-    "@types/chrome": "^0.0.304",
-    "@types/chroma-js": "^2.4.4",
-    "vite": "^6.3.2",
-    "@crxjs/vite-plugin": "^2.0.0-beta.33",
     "@vitejs/plugin-react": "^4.4.1",
-    "tailwindcss": "^4.1.4",
-    "@tailwindcss/vite": "^4.1.4",
+    "@vitest/coverage-v8": "^4.1.2",
     "autoprefixer": "^10.4.21",
-    "eslint": "^9.25.0"
+    "eslint": "^9.25.0",
+    "jsdom": "^29.0.1",
+    "tailwindcss": "^4.1.4",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.2",
+    "vitest": "^4.1.2"
   }
 }
