@@ -21,11 +21,11 @@
   },
   "content_scripts": [
     {
-      "js": [
-        "assets/index.ts-loader-Bqx7lo3D.js"
-      ],
       "matches": [
         "<all_urls>"
+      ],
+      "js": [
+        "src/content/index.ts-loader.js"
       ],
       "css": []
     }
@@ -57,12 +57,8 @@
         "<all_urls>"
       ],
       "resources": [
-        "assets/colors-Czz5EmDP.js",
-        "assets/messages-CGxgbOds.js",
-        "assets/ContentApp-DS3Bful2.js",
-        "assets/Scan.es-D0n8eUjn.js",
-        "assets/Eyedropper.es-Cn4UL7iP.js",
-        "assets/index.ts-vezM8RYQ.js"
+        "**/*",
+        "*"
       ],
       "use_dynamic_url": false
     }
