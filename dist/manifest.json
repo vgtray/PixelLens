@@ -1,0 +1,70 @@
+{
+  "manifest_version": 3,
+  "name": "PixelLens",
+  "version": "1.0.0",
+  "description": "Inspect any website. Copy any design system.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "activeTab",
+    "sidePanel",
+    "storage",
+    "clipboardWrite"
+  ],
+  "background": {
+    "service_worker": "service-worker-loader.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "js": [
+        "assets/index.ts-loader-Bqx7lo3D.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "css": []
+    }
+  ],
+  "side_panel": {
+    "default_path": "src/sidepanel/index.html"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "commands": {
+    "_execute_action": {},
+    "toggle-inspect": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+L"
+      },
+      "description": "Toggle inspect mode"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "assets/colors-Czz5EmDP.js",
+        "assets/messages-CGxgbOds.js",
+        "assets/ContentApp-DS3Bful2.js",
+        "assets/Scan.es-D0n8eUjn.js",
+        "assets/Eyedropper.es-Cn4UL7iP.js",
+        "assets/index.ts-vezM8RYQ.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}
