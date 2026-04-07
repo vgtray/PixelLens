@@ -1,15 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { crx } from '@crxjs/vite-plugin'
+import webExtension from 'vite-plugin-web-extension'
 import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
-import manifest from './manifest.json'
 
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    crx({ manifest }),
+    webExtension({
+      manifest: 'manifest.json',
+      browser: 'chrome',
+    }),
   ],
   resolve: {
     alias: {

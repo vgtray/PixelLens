@@ -14,7 +14,8 @@ const DEFAULT_PREFERENCES: Preferences = {
 
 export async function getPreferences(): Promise<Preferences> {
   const result = await chrome.storage.sync.get(PREFS_KEY)
-  return { ...DEFAULT_PREFERENCES, ...result[PREFS_KEY] }
+  const stored = result[PREFS_KEY] as Partial<Preferences> | undefined
+  return { ...DEFAULT_PREFERENCES, ...stored }
 }
 
 export async function setPreferences(prefs: Partial<Preferences>): Promise<void> {
@@ -26,7 +27,7 @@ export async function setPreferences(prefs: Partial<Preferences>): Promise<void>
 
 export async function saveDesignSystem(ds: DesignSystem): Promise<void> {
   const result = await chrome.storage.local.get(SCANS_KEY)
-  const scans: DesignSystem[] = result[SCANS_KEY] || []
+  const scans: DesignSystem[] = (result[SCANS_KEY] as DesignSystem[] | undefined) ?? []
   scans.unshift(ds)
   // Keep last 20 scans
   const trimmed = scans.slice(0, 20)
@@ -35,7 +36,7 @@ export async function saveDesignSystem(ds: DesignSystem): Promise<void> {
 
 export async function getDesignSystems(): Promise<DesignSystem[]> {
   const result = await chrome.storage.local.get(SCANS_KEY)
-  return result[SCANS_KEY] || []
+  return (result[SCANS_KEY] as DesignSystem[] | undefined) ?? []
 }
 
 export async function getLatestDesignSystem(): Promise<DesignSystem | null> {
