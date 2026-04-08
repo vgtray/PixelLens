@@ -66,21 +66,12 @@ function ContentApp() {
   }, [mode])
 
   const handleModeChange = useCallback((newMode: ContentMode) => {
-    if (newMode === mode) {
-      // Toggle off
-      setMode('off')
-      sendMessage(MessageType.TOGGLE_INSPECT, { active: false })
-      return
-    }
-
-    setMode(newMode)
-
-    if (newMode === 'inspect') {
-      sendMessage(MessageType.TOGGLE_INSPECT, { active: true })
-    } else if (newMode === 'measure') {
-      sendMessage(MessageType.TOGGLE_INSPECT, { active: false })
-      sendMessage(MessageType.TOGGLE_MEASURE, { active: true })
-    }
+    const resolvedMode = newMode === mode ? 'off' : newMode
+    setMode(resolvedMode)
+    // Dispatch directly to content/index.ts — no round-trip through service worker
+    document.dispatchEvent(
+      new CustomEvent('pixellens:toolbar-mode-change', { detail: { mode: resolvedMode } }),
+    )
   }, [mode])
 
   const handleGridToggle = useCallback(() => {

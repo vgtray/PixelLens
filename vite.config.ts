@@ -18,6 +18,13 @@ export default defineConfig({
       '@': resolve(__dirname, 'src'),
     },
   },
+  server: {
+    hmr: {
+      // Disable error overlay in dev mode -- it takes over the entire
+      // Chrome extension popup (320x400px) and makes it unusable.
+      overlay: false,
+    },
+  },
   build: {
     outDir: 'dist',
     sourcemap: process.env.NODE_ENV === 'development',

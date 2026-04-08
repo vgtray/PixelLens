@@ -33,6 +33,11 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
       const tabId = sender.tab?.id
       if (tabId) {
         toggleInspect(tabId)
+      } else {
+        // Message from popup — query active tab
+        chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          if (tab?.id) toggleInspect(tab.id)
+        })
       }
       sendResponse({ success: true })
       break
@@ -45,13 +50,18 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
     }
 
     case MessageType.ELEMENT_SELECTED: {
-      // Forward element data to the side panel
-      chrome.runtime.sendMessage({
-        type: MessageType.ELEMENT_SELECTED,
-        payload,
-      }).catch(() => {
-        // Side panel not open yet — ignore
-      })
+      const tabId = sender.tab?.id
+      if (tabId) {
+        // Ensure side panel is open before forwarding
+        chrome.sidePanel.open({ tabId }).catch((err) => console.debug('[PixelLens]', err.message))
+        // Small delay to let React mount, then forward
+        setTimeout(() => {
+          chrome.runtime.sendMessage({
+            type: MessageType.ELEMENT_SELECTED,
+            payload,
+          }).catch((err) => console.debug('[PixelLens]', err.message))
+        }, 300)
+      }
       sendResponse({ received: true })
       break
     }
@@ -66,7 +76,7 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
     case MessageType.SCAN_PROGRESS:
     case MessageType.SCAN_COMPLETE: {
       // Forward scan results to the side panel
-      chrome.runtime.sendMessage({ type, payload }).catch(() => {})
+      chrome.runtime.sendMessage({ type, payload }).catch((err) => console.debug('[PixelLens]', err.message))
       sendResponse({ success: true })
       break
     }
@@ -117,29 +127,29 @@ async function toggleInspect(tabId: number) {
   chrome.tabs.sendMessage(tabId, {
     type: MessageType.TOGGLE_INSPECT,
     payload: { active: next },
-  }).catch(() => {})
+  }).catch((err) => console.debug('[PixelLens]', err.message))
 
   // Open side panel when activating
   if (next) {
-    chrome.sidePanel.open({ tabId }).catch(() => {})
+    chrome.sidePanel.open({ tabId }).catch((err) => console.debug('[PixelLens]', err.message))
   }
 }
 
 async function forwardToActiveTab(type: MessageType, payload: unknown) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
   if (tab?.id) {
-    chrome.tabs.sendMessage(tab.id, { type, payload }).catch(() => {})
+    chrome.tabs.sendMessage(tab.id, { type, payload }).catch((err) => console.debug('[PixelLens]', err.message))
   }
 }
 
 async function handleOpenSidePanel(sender: chrome.runtime.MessageSender) {
   const tabId = sender.tab?.id
   if (tabId) {
-    chrome.sidePanel.open({ tabId }).catch(() => {})
+    chrome.sidePanel.open({ tabId }).catch((err) => console.debug('[PixelLens]', err.message))
   } else {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
     if (tab?.id) {
-      chrome.sidePanel.open({ tabId: tab.id }).catch(() => {})
+      chrome.sidePanel.open({ tabId: tab.id }).catch((err) => console.debug('[PixelLens]', err.message))
     }
   }
 }

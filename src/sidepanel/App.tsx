@@ -9,6 +9,7 @@ import {
 import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
 import { MessageType } from '@/types/messages'
+import { saveDesignSystem } from '@/lib/storage'
 import InspectorView from './views/InspectorView'
 import ScanView from './views/ScanView'
 import DesignSystemView from './views/DesignSystemView'
@@ -71,11 +72,14 @@ function App() {
         setInspectedElement(payload.element)
         setMode('inspect')
         sendResponse({ received: true })
+        return
       }
 
       if (message.type === MessageType.SCAN_PROGRESS) {
         const payload = message.payload as { progress: number; phase: string }
         setScanProgress({ percent: payload.progress, phase: payload.phase })
+        sendResponse({ received: true })
+        return
       }
 
       if (message.type === MessageType.SCAN_COMPLETE) {
@@ -84,7 +88,10 @@ function App() {
         addToHistory(payload.designSystem)
         setScanProgress(null)
         setMode('scan')
+        // Persist to storage
+        saveDesignSystem(payload.designSystem).catch(console.error)
         sendResponse({ received: true })
+        return
       }
     }
 

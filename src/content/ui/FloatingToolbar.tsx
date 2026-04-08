@@ -5,7 +5,6 @@ import {
   MagnifyingGlass,
   Ruler,
   GridFour,
-  Eyedropper,
   Scan,
 } from '@phosphor-icons/react'
 import gsap from 'gsap'
@@ -122,12 +121,6 @@ export function FloatingToolbar({
       label: 'Grid',
       active: gridVisible,
       onClick: onGridToggle,
-    },
-    {
-      icon: <Eyedropper size={18} weight="regular" />,
-      label: 'Picker',
-      active: false,
-      onClick: () => {},
     },
     {
       icon: <Scan size={18} weight="regular" />,

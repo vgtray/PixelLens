@@ -114,6 +114,12 @@ onMessage(MessageType.SCAN_PAGE, (_payload, _sender, sendResponse) => {
   return true
 })
 
+// Listen for mode changes dispatched from the toolbar UI (ContentApp)
+document.addEventListener('pixellens:toolbar-mode-change', (e: Event) => {
+  const detail = (e as CustomEvent).detail as { mode: ContentMode }
+  setMode(detail.mode)
+})
+
 // --- Mount UI ---
 
 function mountUI() {
