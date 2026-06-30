@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   MagnifyingGlass,
   Scan,
   Palette,
   Export,
   ClockCounterClockwise,
+  MarkdownLogo,
 } from '@phosphor-icons/react'
 import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
@@ -15,6 +16,7 @@ import ScanView from './views/ScanView'
 import DesignSystemView from './views/DesignSystemView'
 import ExportView from './views/ExportView'
 import HistoryView from './views/HistoryView'
+import MarkdownView from './views/MarkdownView'
 
 const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass }[] = [
   { mode: 'inspect', label: 'Inspect', icon: MagnifyingGlass },
@@ -24,6 +26,7 @@ const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass 
 
 const FOOTER_TABS: { mode: PanelMode; icon: typeof Export; label: string }[] = [
   { mode: 'export', icon: Export, label: 'Export' },
+  { mode: 'markdown', icon: MarkdownLogo, label: 'Markdown' },
   { mode: 'history', icon: ClockCounterClockwise, label: 'History' },
 ]
 
@@ -111,6 +114,8 @@ function App() {
         return <ExportView />
       case 'history':
         return <HistoryView />
+      case 'markdown':
+        return <MarkdownView />
     }
   }
 

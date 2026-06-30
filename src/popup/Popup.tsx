@@ -5,14 +5,21 @@ import {
   ClockCounterClockwise,
   Keyboard,
   GearSix,
+  MarkdownLogo,
+  CircleNotch,
+  Check,
 } from '@phosphor-icons/react'
 import { MessageType } from '@/types/messages'
+import { sendMessage } from '@/lib/messaging'
+import type { MarkdownResult } from '@/types/markdown'
 
 type InspectStatus = 'idle' | 'active'
+type MarkdownStatus = 'idle' | 'working' | 'done' | 'unsupported' | 'failed'
 
 export function Popup() {
   const [status, setStatus] = useState<InspectStatus>('idle')
   const [currentUrl, setCurrentUrl] = useState('')
+  const [mdStatus, setMdStatus] = useState<MarkdownStatus>('idle')
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
@@ -51,6 +58,30 @@ export function Popup() {
     window.close()
   }
 
+  async function handleCopyMarkdown() {
+    if (mdStatus === 'working') return
+    setMdStatus('working')
+    try {
+      const result: MarkdownResult | undefined = await sendMessage(
+        MessageType.EXTRACT_MARKDOWN,
+        undefined,
+      )
+      if (!result) {
+        // `undefined` = content script unreachable -> page not supported (aligns w/ side panel).
+        setMdStatus('unsupported')
+        setTimeout(() => setMdStatus('idle'), 2000)
+        return
+      }
+      await navigator.clipboard.writeText(result.fullDocument)
+      setMdStatus('done')
+      setTimeout(() => setMdStatus('idle'), 1800)
+    } catch {
+      // A rejected promise is a genuine failure, not an unsupported page.
+      setMdStatus('failed')
+      setTimeout(() => setMdStatus('idle'), 2000)
+    }
+  }
+
   async function handleLastScan() {
     chrome.runtime.sendMessage({
       type: MessageType.OPEN_SIDE_PANEL,
@@ -58,6 +89,17 @@ export function Popup() {
     })
     window.close()
   }
+
+  const mdLabel =
+    mdStatus === 'working'
+      ? 'Converting…'
+      : mdStatus === 'done'
+        ? 'Copied!'
+        : mdStatus === 'unsupported'
+          ? 'Page not supported'
+          : mdStatus === 'failed'
+            ? 'Conversion failed'
+            : 'Copy as Markdown'
 
   return (
     <div className="popup">
@@ -92,6 +134,28 @@ export function Popup() {
         <button className="popup-btn" onClick={handleScan}>
           <Scan size={18} weight="bold" />
           <span>Scan this page</span>
+        </button>
+
+        <button
+          className="popup-btn"
+          onClick={handleCopyMarkdown}
+          disabled={mdStatus === 'working'}
+          style={
+            mdStatus === 'done'
+              ? { background: 'var(--color-success)', borderColor: 'var(--color-success)', color: '#fff' }
+              : mdStatus === 'working'
+                ? { opacity: 0.75 }
+                : undefined
+          }
+        >
+          {mdStatus === 'working' ? (
+            <CircleNotch size={18} weight="bold" className="animate-spin" />
+          ) : mdStatus === 'done' ? (
+            <Check size={18} weight="bold" />
+          ) : (
+            <MarkdownLogo size={18} weight="bold" />
+          )}
+          <span>{mdLabel}</span>
         </button>
 
         <button className="popup-btn" onClick={handleLastScan}>

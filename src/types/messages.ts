@@ -2,6 +2,7 @@
 
 import type { InspectedElement } from './inspection'
 import type { DesignSystem } from './design-system'
+import type { MarkdownResult } from './markdown'
 
 export enum MessageType {
   TOGGLE_INSPECT = 'TOGGLE_INSPECT',
@@ -9,6 +10,7 @@ export enum MessageType {
   SCAN_PAGE = 'SCAN_PAGE',
   SCAN_PROGRESS = 'SCAN_PROGRESS',
   SCAN_COMPLETE = 'SCAN_COMPLETE',
+  EXTRACT_MARKDOWN = 'EXTRACT_MARKDOWN',
   TOGGLE_GRID = 'TOGGLE_GRID',
   TOGGLE_MEASURE = 'TOGGLE_MEASURE',
   GET_PREFERENCES = 'GET_PREFERENCES',
@@ -22,6 +24,7 @@ export interface MessagePayloadMap {
   [MessageType.SCAN_PAGE]: undefined
   [MessageType.SCAN_PROGRESS]: { progress: number; phase: string }
   [MessageType.SCAN_COMPLETE]: { designSystem: DesignSystem }
+  [MessageType.EXTRACT_MARKDOWN]: undefined
   [MessageType.TOGGLE_GRID]: { visible: boolean; size?: number }
   [MessageType.TOGGLE_MEASURE]: { active: boolean }
   [MessageType.GET_PREFERENCES]: undefined
@@ -44,4 +47,5 @@ export type MessageResponse<T extends MessageType = MessageType> =
   T extends MessageType.GET_PREFERENCES ? Preferences :
   T extends MessageType.ELEMENT_SELECTED ? { received: boolean } :
   T extends MessageType.SCAN_COMPLETE ? { received: boolean } :
+  T extends MessageType.EXTRACT_MARKDOWN ? MarkdownResult :
   { success: boolean }

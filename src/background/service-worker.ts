@@ -81,6 +81,28 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
       break
     }
 
+    case MessageType.EXTRACT_MARKDOWN: {
+      // Route extraction to the active tab's content script and relay the result back.
+      // Every path MUST call sendResponse, otherwise the UI-side promise rejects (MV3)
+      // and the panel/popup shows a generic failure instead of "page not supported".
+      // We answer `undefined` when there is no usable tab or the content script is
+      // unreachable (chrome://, Web Store, PDF viewer, script not injected).
+      chrome.tabs.query({ active: true, currentWindow: true }).then(async ([tab]) => {
+        if (!tab?.id) {
+          sendResponse(undefined)
+          return
+        }
+        try {
+          const result = await chrome.tabs.sendMessage(tab.id, { type, payload })
+          sendResponse(result)
+        } catch (err) {
+          console.debug('[PixelLens]', (err as Error).message)
+          sendResponse(undefined)
+        }
+      })
+      return true // async response
+    }
+
     case MessageType.TOGGLE_GRID:
     case MessageType.TOGGLE_MEASURE: {
       forwardToActiveTab(type, payload)

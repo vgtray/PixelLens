@@ -16,6 +16,10 @@ export function downloadFile(content: string, filename: string, mime: string): v
   URL.revokeObjectURL(url)
 }
 
+export function downloadMarkdown(filename: string, content: string): void {
+  downloadFile(content, filename, 'text/markdown;charset=utf-8')
+}
+
 export function generatePalettePNG(colors: ColorToken[]): Blob {
   const swatchSize = 80
   const cols = Math.min(colors.length, 8)

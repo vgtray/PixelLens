@@ -15,21 +15,6 @@ const COLOR_PROPERTIES = [
   'text-decoration-color',
 ]
 
-const TYPOGRAPHY_PROPERTIES = [
-  'font-family',
-  'font-size',
-  'font-weight',
-  'line-height',
-  'letter-spacing',
-]
-
-const EFFECT_PROPERTIES = [
-  'box-shadow',
-  'opacity',
-  'backdrop-filter',
-  'border-radius',
-]
-
 export interface ParsedStyles {
   colors: ColorInfo[]
   typography: TypographyInfo

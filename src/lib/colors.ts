@@ -1,7 +1,7 @@
 // PixelLens — Color Utilities (Chroma.js wrappers)
 
 import chroma from 'chroma-js'
-import type { ColorToken, ColorCategory } from '@/types/design-system'
+import type { ColorToken } from '@/types/design-system'
 
 export function toHex(color: string): string {
   try {

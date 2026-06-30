@@ -1,8 +1,9 @@
 import { create } from 'zustand'
 import type { InspectedElement } from '@/types/inspection'
 import type { DesignSystem } from '@/types/design-system'
+import type { MarkdownResult } from '@/types/markdown'
 
-export type PanelMode = 'inspect' | 'scan' | 'design-system' | 'export' | 'history'
+export type PanelMode = 'inspect' | 'scan' | 'design-system' | 'export' | 'history' | 'markdown'
 
 export interface ScanProgress {
   percent: number
@@ -16,6 +17,9 @@ interface PanelState {
   scanProgress: ScanProgress | null
   colorFormat: 'hex' | 'rgb' | 'hsl'
   history: DesignSystem[]
+  markdownResult: MarkdownResult | null
+  markdownLoading: boolean
+  markdownError: string | null
 
   setMode: (mode: PanelMode) => void
   setInspectedElement: (el: InspectedElement | null) => void
@@ -24,6 +28,9 @@ interface PanelState {
   setColorFormat: (format: 'hex' | 'rgb' | 'hsl') => void
   addToHistory: (ds: DesignSystem) => void
   clearHistory: () => void
+  setMarkdownResult: (result: MarkdownResult | null) => void
+  setMarkdownLoading: (loading: boolean) => void
+  setMarkdownError: (error: string | null) => void
 }
 
 export const usePanelStore = create<PanelState>((set) => ({
@@ -33,6 +40,9 @@ export const usePanelStore = create<PanelState>((set) => ({
   scanProgress: null,
   colorFormat: 'hex',
   history: [],
+  markdownResult: null,
+  markdownLoading: false,
+  markdownError: null,
 
   setMode: (mode) => set({ activeMode: mode }),
   setInspectedElement: (el) => set({ inspectedElement: el }),
@@ -42,4 +52,7 @@ export const usePanelStore = create<PanelState>((set) => ({
   addToHistory: (ds) =>
     set((state) => ({ history: [ds, ...state.history].slice(0, 20) })),
   clearHistory: () => set({ history: [] }),
+  setMarkdownResult: (result) => set({ markdownResult: result }),
+  setMarkdownLoading: (loading) => set({ markdownLoading: loading }),
+  setMarkdownError: (error) => set({ markdownError: error }),
 }))

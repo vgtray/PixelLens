@@ -99,7 +99,7 @@ onMessage(MessageType.TOGGLE_GRID, (payload) => {
   }
 })
 
-onMessage(MessageType.SCAN_PAGE, (_payload, _sender, sendResponse) => {
+onMessage(MessageType.SCAN_PAGE, (_payload, _sender, _sendResponse) => {
   if (!scanner) {
     scanner = new PageScanner()
   }
@@ -109,6 +109,19 @@ onMessage(MessageType.SCAN_PAGE, (_payload, _sender, sendResponse) => {
   }).then((designSystem) => {
     sendMessage(MessageType.SCAN_COMPLETE, { designSystem })
   })
+
+  // Return true to keep the message channel open for async response
+  return true
+})
+
+onMessage(MessageType.EXTRACT_MARKDOWN, (_payload, _sender, sendResponse) => {
+  // Lazy-load le moteur (turndown) uniquement à la demande — hors du bundle initial.
+  import('./scanner/MarkdownExtractor')
+    .then(({ MarkdownExtractor }) => {
+      const extractor = new MarkdownExtractor()
+      sendResponse(extractor.extract())
+    })
+    .catch((err) => console.debug('[PixelLens]', (err as Error).message))
 
   // Return true to keep the message channel open for async response
   return true
