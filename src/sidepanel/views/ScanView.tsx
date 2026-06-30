@@ -23,6 +23,7 @@ function ScanView() {
   const designSystem = usePanelStore((s) => s.designSystem)
   const setMode = usePanelStore((s) => s.setMode)
   const [activeTab, setActiveTab] = useState<ScanTab>('colors')
+  const [scanError, setScanError] = useState<string | null>(null)
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
   const progressBarRef = useRef<HTMLDivElement>(null)
@@ -68,8 +69,16 @@ function ScanView() {
     }
   }, [scanProgress])
 
-  const handleStartScan = () => {
-    sendMessage(MessageType.SCAN_PAGE, undefined)
+  const handleStartScan = async () => {
+    setScanError(null)
+    // The service worker only resolves once it has pinged / re-injected the
+    // content script and forwarded the request. `success: false` means the
+    // active page can't be scanned (no content script could be reached) — show
+    // it instead of failing silently.
+    const res = await sendMessage(MessageType.SCAN_PAGE, undefined)
+    if (!res?.success) {
+      setScanError("Can't scan this page. Try reloading the tab.")
+    }
   }
 
   // Scanning in progress
@@ -118,6 +127,9 @@ function ScanView() {
           >
             Start Scan
           </button>
+          {scanError && (
+            <p className="text-[11px] text-red-400 mt-3">{scanError}</p>
+          )}
         </div>
       </div>
     )

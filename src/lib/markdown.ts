@@ -190,3 +190,83 @@ function yamlString(value: string): string {
 function normalizeMarkdown(markdown: string): string {
   return markdown.replace(/\n{3,}/g, '\n\n').trim()
 }
+
+
+// --- Document-mode conversion (pages fetchées par le crawler) -------------------------
+//
+// Variante ADDITIVE de la conversion, pour un Document issu de DOMParser (page récupérée
+// par fetch côté content script), où AUCUN style calculé n'est disponible (pas de layout).
+// On ne peut donc pas détecter les éléments masqués par CSS comme le fait MarkdownExtractor
+// sur le DOM live : on se limite à un nettoyage STATIQUE (bruit non-contenu + [hidden] +
+// aria-hidden + commentaires) avant de réutiliser tel quel htmlToMarkdown. Le chemin
+// page-courante (htmlToMarkdown direct + MarkdownExtractor) reste INCHANGÉ.
+
+// Miroir du NOISE_SELECTOR de MarkdownExtractor (dupliqué volontairement pour garder
+// lib/markdown autonome : l'importer depuis le content script créerait un cycle).
+const NOISE_SELECTOR_DOC = [
+  'script',
+  'style',
+  'noscript',
+  'template',
+  'svg',
+  'iframe',
+  'object',
+  'embed',
+].join(', ')
+
+/**
+ * Convertit un Document complet (issu de DOMParser) en Markdown GFM. Réservé aux pages
+ * fetchées par le crawler : nettoyage statique uniquement, puis délégation à htmlToMarkdown.
+ * Le Document est jetable et muté en place (jamais un DOM live).
+ */
+export function htmlDocumentToMarkdown(doc: Document, url: string): MarkdownResult {
+  const body = (doc.body ?? doc.documentElement) as HTMLElement
+  body.querySelectorAll(NOISE_SELECTOR_DOC).forEach((n) => n.remove())
+  body.querySelectorAll('[hidden], [aria-hidden="true"]').forEach((n) => n.remove())
+  removeCommentNodes(body)
+  return htmlToMarkdown(body, deriveContextFromDoc(doc, url))
+}
+
+function deriveContextFromDoc(doc: Document, url: string): MarkdownPageContext {
+  const meta = (selector: string): string | undefined =>
+    doc.querySelector(selector)?.getAttribute('content')?.trim() || undefined
+
+  const ogTitle = meta('meta[property="og:title"]')
+  const title = (doc.title || ogTitle || '').trim() || 'Untitled'
+  const description =
+    meta('meta[name="description"]') || meta('meta[property="og:description"]')
+  const siteName = meta('meta[property="og:site_name"]')
+  const lang = doc.documentElement.getAttribute('lang')?.trim() || undefined
+
+  // <base href> éventuel, résolu contre l'URL de la page ; sinon l'URL elle-même.
+  let baseURI = url
+  const baseHref = doc.querySelector('base[href]')?.getAttribute('href')
+  if (baseHref) {
+    try {
+      baseURI = new URL(baseHref, url).href
+    } catch {
+      baseURI = url
+    }
+  }
+
+  return {
+    url,
+    baseURI,
+    title,
+    description,
+    siteName,
+    lang,
+    capturedAt: new Date().toISOString(),
+  }
+}
+
+function removeCommentNodes(root: HTMLElement): void {
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_COMMENT)
+  const comments: Comment[] = []
+  let node = walker.nextNode()
+  while (node) {
+    comments.push(node as Comment)
+    node = walker.nextNode()
+  }
+  comments.forEach((c) => c.remove())
+}

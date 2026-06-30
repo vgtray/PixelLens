@@ -48,6 +48,8 @@ import {
   setPreferences,
   saveDesignSystem,
   getDesignSystems,
+  setPanelInitialMode,
+  PANEL_STATE_STORAGE_KEY,
 } from '../storage';
 import type { DesignSystem } from '@/types/design-system';
 
@@ -106,5 +108,41 @@ describe('saveDesignSystem / getDesignSystems', () => {
   it('returns empty array when none stored', async () => {
     const systems = await getDesignSystems();
     expect(systems).toEqual([]);
+  });
+});
+
+describe('setPanelInitialMode', () => {
+  beforeEach(() => {
+    mockStorage = {};
+  });
+
+  it('creates a fresh persist envelope when none exists', async () => {
+    await setPanelInitialMode('history');
+    const parsed = JSON.parse(mockStorage[PANEL_STATE_STORAGE_KEY]);
+    expect(parsed.version).toBe(0);
+    expect(parsed.state.activeMode).toBe('history');
+  });
+
+  it('patches activeMode while preserving other durable state and version', async () => {
+    mockStorage[PANEL_STATE_STORAGE_KEY] = JSON.stringify({
+      version: 0,
+      state: { activeMode: 'inspect', colorFormat: 'rgb', markdownResult: { markdown: '# Hi' } },
+    });
+    await setPanelInitialMode('design-system');
+    const parsed = JSON.parse(mockStorage[PANEL_STATE_STORAGE_KEY]);
+    expect(parsed.version).toBe(0);
+    expect(parsed.state.activeMode).toBe('design-system');
+    // Sibling durable fields must survive the patch (the panel keeps colorFormat
+    // and the last markdown result across the open).
+    expect(parsed.state.colorFormat).toBe('rgb');
+    expect(parsed.state.markdownResult).toMatchObject({ markdown: '# Hi' });
+  });
+
+  it('recovers from a corrupt envelope instead of throwing', async () => {
+    mockStorage[PANEL_STATE_STORAGE_KEY] = 'not-json{';
+    await expect(setPanelInitialMode('scan')).resolves.toBeUndefined();
+    const parsed = JSON.parse(mockStorage[PANEL_STATE_STORAGE_KEY]);
+    expect(parsed.state.activeMode).toBe('scan');
+    expect(parsed.version).toBe(0);
   });
 });

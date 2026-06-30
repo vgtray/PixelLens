@@ -127,6 +127,90 @@ onMessage(MessageType.EXTRACT_MARKDOWN, (_payload, _sender, sendResponse) => {
   return true
 })
 
+// --- Site crawl (CRAWL_SITE / STOP_CRAWL) ---
+//
+// Les fetch same-origin tournent ICI, dans le content script : il partage l'origine de
+// la page, donc fetch() n'est pas soumis à CORS et ne réclame aucune host_permission.
+// L'orchestration (BFS/sitemap, robots, bornes, dédup, annulation) vit dans lib/crawler ;
+// on lui injecte le fetch réel et la conversion HTML→Markdown (htmlDocumentToMarkdown).
+// Limite V1 : si l'utilisateur quitte/recharge l'onglet, ce script meurt et le crawl
+// s'arrête (le panel restera alors sur la progression jusqu'à un nouveau lancement).
+let crawlAborted = false
+let crawlInProgress = false
+
+onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
+  // Ignore un second lancement tant qu'un crawl tourne (un seul à la fois par onglet).
+  if (crawlInProgress) {
+    sendResponse({ success: false })
+    return
+  }
+  crawlInProgress = true
+  crawlAborted = false
+
+  // Lazy-load : crawler + moteur Markdown (turndown) hors du bundle content initial.
+  Promise.all([import('@/lib/crawler'), import('@/lib/markdown')])
+    .then(async ([{ crawlSite }, { htmlDocumentToMarkdown }]) => {
+      // Le content script fait autorité sur l'URL de départ : si le panel n'a pas pu
+      // fournir tab.url, on prend location.href de la page courante.
+      const startUrl = options.startUrl || location.href
+      const result = await crawlSite({ ...options, startUrl }, {
+        fetchText: async (url) => {
+          try {
+            const res = await fetch(url, { credentials: 'same-origin', redirect: 'follow' })
+            if (!res.ok) return null
+            const ct = res.headers.get('content-type') ?? ''
+            // Évite le binaire : on ne lit que du texte/HTML/XML.
+            if (ct && !/(text|html|xml|json|plain)/i.test(ct)) return null
+            return await res.text()
+          } catch {
+            return null
+          }
+        },
+        convert: (html, url) => {
+          try {
+            const doc = new DOMParser().parseFromString(html, 'text/html')
+            const md = htmlDocumentToMarkdown(doc, url)
+            const body = md.markdown.trim()
+            if (!body) return null
+            return {
+              url,
+              title: md.frontmatter.title,
+              markdown: body,
+              wordCount: md.frontmatter.wordCount,
+            }
+          } catch {
+            return null
+          }
+        },
+        onProgress: (progress) => {
+          sendMessage(MessageType.CRAWL_PROGRESS, progress).catch(() => {})
+        },
+        shouldStop: () => crawlAborted,
+      })
+      sendMessage(MessageType.CRAWL_COMPLETE, { result }).catch(() => {})
+    })
+    .catch((err) => console.debug('[PixelLens]', (err as Error).message))
+    .finally(() => {
+      crawlInProgress = false
+    })
+
+  // Ack immédiat de la prise en charge ; les résultats arrivent via CRAWL_PROGRESS/COMPLETE.
+  sendResponse({ success: true })
+  return true
+})
+
+onMessage(MessageType.STOP_CRAWL, (_payload, _sender, sendResponse) => {
+  crawlAborted = true
+  sendResponse({ success: true })
+})
+
+// Liveness probe used by the service worker before forwarding a scan: lets it
+// detect a tab where this content script was never (re)injected (e.g. tabs
+// restored after a Chrome restart) and re-inject it before sending SCAN_PAGE.
+onMessage(MessageType.PING, (_payload, _sender, sendResponse) => {
+  sendResponse({ alive: true })
+})
+
 // Listen for mode changes dispatched from the toolbar UI (ContentApp)
 document.addEventListener('pixellens:toolbar-mode-change', (e: Event) => {
   const detail = (e as CustomEvent).detail as { mode: ContentMode }

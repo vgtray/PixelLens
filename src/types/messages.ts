@@ -3,6 +3,7 @@
 import type { InspectedElement } from './inspection'
 import type { DesignSystem } from './design-system'
 import type { MarkdownResult } from './markdown'
+import type { CrawlOptions, CrawlProgress, CrawlResult } from './crawl'
 
 export enum MessageType {
   TOGGLE_INSPECT = 'TOGGLE_INSPECT',
@@ -11,11 +12,16 @@ export enum MessageType {
   SCAN_PROGRESS = 'SCAN_PROGRESS',
   SCAN_COMPLETE = 'SCAN_COMPLETE',
   EXTRACT_MARKDOWN = 'EXTRACT_MARKDOWN',
+  CRAWL_SITE = 'CRAWL_SITE',
+  CRAWL_PROGRESS = 'CRAWL_PROGRESS',
+  CRAWL_COMPLETE = 'CRAWL_COMPLETE',
+  STOP_CRAWL = 'STOP_CRAWL',
   TOGGLE_GRID = 'TOGGLE_GRID',
   TOGGLE_MEASURE = 'TOGGLE_MEASURE',
   GET_PREFERENCES = 'GET_PREFERENCES',
   SET_PREFERENCES = 'SET_PREFERENCES',
   OPEN_SIDE_PANEL = 'OPEN_SIDE_PANEL',
+  PING = 'PING',
 }
 
 export interface MessagePayloadMap {
@@ -25,11 +31,16 @@ export interface MessagePayloadMap {
   [MessageType.SCAN_PROGRESS]: { progress: number; phase: string }
   [MessageType.SCAN_COMPLETE]: { designSystem: DesignSystem }
   [MessageType.EXTRACT_MARKDOWN]: undefined
+  [MessageType.CRAWL_SITE]: CrawlOptions
+  [MessageType.CRAWL_PROGRESS]: CrawlProgress
+  [MessageType.CRAWL_COMPLETE]: { result: CrawlResult }
+  [MessageType.STOP_CRAWL]: undefined
   [MessageType.TOGGLE_GRID]: { visible: boolean; size?: number }
   [MessageType.TOGGLE_MEASURE]: { active: boolean }
   [MessageType.GET_PREFERENCES]: undefined
   [MessageType.SET_PREFERENCES]: { preferences: Partial<Preferences> }
   [MessageType.OPEN_SIDE_PANEL]: undefined
+  [MessageType.PING]: undefined
 }
 
 export interface Message<T extends MessageType = MessageType> {
@@ -48,4 +59,5 @@ export type MessageResponse<T extends MessageType = MessageType> =
   T extends MessageType.ELEMENT_SELECTED ? { received: boolean } :
   T extends MessageType.SCAN_COMPLETE ? { received: boolean } :
   T extends MessageType.EXTRACT_MARKDOWN ? MarkdownResult :
+  T extends MessageType.PING ? { alive: boolean } :
   { success: boolean }

@@ -6,17 +6,21 @@ import {
   Export,
   ClockCounterClockwise,
   MarkdownLogo,
+  GlobeHemisphereWest,
+  GearSix,
 } from '@phosphor-icons/react'
 import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
 import { MessageType } from '@/types/messages'
-import { saveDesignSystem } from '@/lib/storage'
+import { saveDesignSystem, getDesignSystems } from '@/lib/storage'
 import InspectorView from './views/InspectorView'
 import ScanView from './views/ScanView'
 import DesignSystemView from './views/DesignSystemView'
 import ExportView from './views/ExportView'
 import HistoryView from './views/HistoryView'
 import MarkdownView from './views/MarkdownView'
+import CrawlView from './views/CrawlView'
+import SettingsView from './views/SettingsView'
 
 const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass }[] = [
   { mode: 'inspect', label: 'Inspect', icon: MagnifyingGlass },
@@ -27,33 +31,82 @@ const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass 
 const FOOTER_TABS: { mode: PanelMode; icon: typeof Export; label: string }[] = [
   { mode: 'export', icon: Export, label: 'Export' },
   { mode: 'markdown', icon: MarkdownLogo, label: 'Markdown' },
+  { mode: 'crawl', icon: GlobeHemisphereWest, label: 'Crawl site' },
   { mode: 'history', icon: ClockCounterClockwise, label: 'History' },
+  { mode: 'settings', icon: GearSix, label: 'Settings' },
 ]
 
 function App() {
   const activeMode = usePanelStore((s) => s.activeMode)
+  const hasHydrated = usePanelStore((s) => s.hasHydrated)
   const setMode = usePanelStore((s) => s.setMode)
   const setInspectedElement = usePanelStore((s) => s.setInspectedElement)
   const setDesignSystem = usePanelStore((s) => s.setDesignSystem)
   const setScanProgress = usePanelStore((s) => s.setScanProgress)
   const addToHistory = usePanelStore((s) => s.addToHistory)
+  const setCrawlProgress = usePanelStore((s) => s.setCrawlProgress)
+  const setCrawlResult = usePanelStore((s) => s.setCrawlResult)
+  const setCrawlRunning = usePanelStore((s) => s.setCrawlRunning)
 
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const indicatorRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)
 
-  // GSAP sliding indicator
+  // On mount (every time the side panel is opened — MV3 tears it down on close),
+  // restore the durable state that lives outside the persisted panel envelope
+  // and clear any transient flag so the UI never rehydrates stuck "in progress".
   useEffect(() => {
-    const idx = MAIN_TABS.findIndex((t) => t.mode === activeMode)
-    if (idx === -1) return
-    const el = tabsRef.current[idx]
+    // Wait for the async persist rehydration to finish first. Running before it
+    // would (a) read the not-yet-restored default state and (b) trigger persist
+    // writes that race with — and can clobber — the envelope being read back.
+    if (!hasHydrated) return
+    const store = usePanelStore.getState()
+    store.setScanProgress(null)
+    store.setMarkdownLoading(false)
+    store.setMarkdownError(null)
+
+    // Rebuild scan history + last result from the canonical scan store shared
+    // with the service worker (pixellens_scans), so returning to the panel
+    // keeps the previous scan instead of resetting to the empty state.
+    let cancelled = false
+    getDesignSystems()
+      .then((scans) => {
+        if (cancelled || scans.length === 0) return
+        const s = usePanelStore.getState()
+        if (s.history.length === 0) s.setHistory(scans)
+        if (!s.designSystem) s.setDesignSystem(scans[0])
+      })
+      .catch((err) => console.error('[PixelLens]', err))
+    return () => {
+      cancelled = true
+    }
+  }, [hasHydrated])
+
+  // GSAP sliding indicator. `hasHydrated` is a dependency so the indicator is
+  // (re)positioned on the very paint where the restored activeMode lands, not a
+  // stale default — and never left stuck on the wrong tab after rehydration.
+  useEffect(() => {
     const indicator = indicatorRef.current
-    if (!el || !indicator) return
+    if (!indicator) return
+
+    const idx = MAIN_TABS.findIndex((t) => t.mode === activeMode)
+    if (idx === -1) {
+      // Footer modes (export/markdown/history) have no main-nav tab: hide the
+      // indicator instead of leaving it glued to a main tab (notably "Inspect"
+      // right after a rehydration that restored a footer mode). Keep
+      // isFirstRender untouched so the first main tab still snaps cleanly.
+      gsap.set(indicator, { opacity: 0 })
+      return
+    }
+
+    const el = tabsRef.current[idx]
+    if (!el) return
 
     if (isFirstRender.current) {
-      gsap.set(indicator, { left: el.offsetLeft, width: el.offsetWidth })
+      gsap.set(indicator, { left: el.offsetLeft, width: el.offsetWidth, opacity: 1 })
       isFirstRender.current = false
     } else {
+      gsap.set(indicator, { opacity: 1 })
       gsap.to(indicator, {
         left: el.offsetLeft,
         width: el.offsetWidth,
@@ -61,7 +114,7 @@ function App() {
         ease: 'power3.out',
       })
     }
-  }, [activeMode])
+  }, [activeMode, hasHydrated])
 
   // Listen for Chrome runtime messages
   useEffect(() => {
@@ -96,11 +149,40 @@ function App() {
         sendResponse({ received: true })
         return
       }
+
+      if (message.type === MessageType.CRAWL_PROGRESS) {
+        setCrawlProgress(message.payload as import('@/types/crawl').CrawlProgress)
+        sendResponse({ received: true })
+        return
+      }
+
+      if (message.type === MessageType.CRAWL_COMPLETE) {
+        const { result } = message.payload as { result: import('@/types/crawl').CrawlResult }
+        setCrawlResult(result)
+        setCrawlProgress(null)
+        setCrawlRunning(false)
+        setMode('crawl')
+        sendResponse({ received: true })
+        return
+      }
     }
 
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
-  }, [setInspectedElement, setDesignSystem, setScanProgress, setMode, addToHistory])
+  }, [setInspectedElement, setDesignSystem, setScanProgress, setMode, addToHistory, setCrawlProgress, setCrawlResult, setCrawlRunning])
+
+  // Until the async persist rehydration completes we don't know the real
+  // activeMode/markdown state yet. Show a minimal on-brand loader rather than
+  // painting the default state and snapping to the restored one a frame later.
+  if (!hasHydrated) {
+    return (
+      <div className="flex items-center justify-center h-screen bg-panel-bg">
+        <div className="w-5 h-5 rounded bg-panel-accent flex items-center justify-center animate-pulse">
+          <span className="text-white text-[10px] font-semibold leading-none">P</span>
+        </div>
+      </div>
+    )
+  }
 
   const renderView = () => {
     switch (activeMode) {
@@ -116,6 +198,10 @@ function App() {
         return <HistoryView />
       case 'markdown':
         return <MarkdownView />
+      case 'crawl':
+        return <CrawlView />
+      case 'settings':
+        return <SettingsView />
     }
   }
 
@@ -137,7 +223,7 @@ function App() {
           <div
             ref={indicatorRef}
             className="absolute bottom-0 h-[2px] bg-panel-accent rounded-full"
-            style={{ willChange: 'left, width' }}
+            style={{ willChange: 'left, width', opacity: 0 }}
           />
           {MAIN_TABS.map((tab, i) => {
             const Icon = tab.icon
