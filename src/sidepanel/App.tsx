@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   MagnifyingGlass,
   Scan,
@@ -22,6 +22,7 @@ import MarkdownView from './views/MarkdownView'
 import CrawlView from './views/CrawlView'
 import SettingsView from './views/SettingsView'
 import PixelLensLogo from './components/PixelLensLogo'
+import CommandPalette, { createNavigationCommands, isMacPlatform } from './components/CommandPalette'
 import { prefersReducedMotion } from './reducedMotion'
 
 const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass }[] = [
@@ -54,6 +55,24 @@ function App() {
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const indicatorRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)
+
+  // Command palette: transient, LOCAL state only — it is an accelerator, never
+  // part of the persisted panel envelope.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const commands = useMemo(() => createNavigationCommands(setMode), [setMode])
+  const shortcutLabel = isMacPlatform() ? '⌘K' : 'Ctrl K'
+
+  // Global ⌘K / Ctrl+K toggles the palette from anywhere in the panel.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // On mount (every time the side panel is opened — MV3 tears it down on close),
   // restore the durable state that lives outside the persisted panel envelope
@@ -231,6 +250,15 @@ function App() {
           <h1 className="text-[16px] font-semibold text-panel-text tracking-tight">
             PixelLens
           </h1>
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Open command palette"
+            title="Command palette"
+            className="ml-auto flex items-center gap-1 rounded-md border border-panel-border px-1.5 py-1 font-mono text-[10px] leading-none text-panel-text-dim transition-colors hover:border-panel-text-dim hover:text-panel-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg"
+          >
+            {shortcutLabel}
+          </button>
         </div>
 
         {/* Mode tabs with GSAP sliding indicator */}
@@ -292,6 +320,12 @@ function App() {
         </div>
         <span className="text-[10px] text-panel-text-dim font-mono">v1.0.0</span>
       </footer>
+
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   )
 }

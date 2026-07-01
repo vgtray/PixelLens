@@ -9,10 +9,12 @@ import {
   GlobeHemisphereWest,
   CircleNotch,
   Check,
+  Sparkle,
 } from '@phosphor-icons/react'
 import { MessageType } from '@/types/messages'
 import { sendMessage } from '@/lib/messaging'
-import { setPanelInitialMode } from '@/lib/storage'
+import { setPanelInitialMode, getLatestDesignSystem } from '@/lib/storage'
+import { buildLlmBundle } from '@/lib/llm-bundle'
 import type { MarkdownResult } from '@/types/markdown'
 import PixelLensLogo from '@/sidepanel/components/PixelLensLogo'
 
@@ -35,6 +37,7 @@ export function Popup() {
   const [status, setStatus] = useState<InspectStatus>('idle')
   const [currentUrl, setCurrentUrl] = useState('')
   const [mdStatus, setMdStatus] = useState<MarkdownStatus>('idle')
+  const [llmStatus, setLlmStatus] = useState<MarkdownStatus>('idle')
   // The active tab id, captured on mount so the click handlers can call
   // chrome.sidePanel.open({ tabId }) synchronously — no awaited query is
   // allowed before the open() or Chrome drops the user gesture.
@@ -128,6 +131,32 @@ export function Popup() {
     }
   }
 
+  async function handleCopyLlm() {
+    if (llmStatus === 'working') return
+    setLlmStatus('working')
+    try {
+      const result: MarkdownResult | undefined = await sendMessage(
+        MessageType.EXTRACT_MARKDOWN,
+        undefined,
+      )
+      if (!result) {
+        // `undefined` = content script unreachable -> page not supported.
+        setLlmStatus('unsupported')
+        setTimeout(() => setLlmStatus('idle'), 2000)
+        return
+      }
+      // Fold in the last scan's design tokens when the user has scanned before;
+      // buildLlmBundle degrades gracefully to a "no scan yet" note otherwise.
+      const designSystem = await getLatestDesignSystem()
+      await navigator.clipboard.writeText(buildLlmBundle({ markdown: result, designSystem }))
+      setLlmStatus('done')
+      setTimeout(() => setLlmStatus('idle'), 1800)
+    } catch {
+      setLlmStatus('failed')
+      setTimeout(() => setLlmStatus('idle'), 2000)
+    }
+  }
+
   async function handleLastScan() {
     // Same gesture rule as handleScan: open synchronously here, never via a SW
     // message hop. App.tsx rebuilds the last design system from pixellens_scans
@@ -170,6 +199,17 @@ export function Popup() {
           : mdStatus === 'failed'
             ? 'Conversion failed'
             : 'Copy as Markdown'
+
+  const llmLabel =
+    llmStatus === 'working'
+      ? 'Bundling…'
+      : llmStatus === 'done'
+        ? 'Copied!'
+        : llmStatus === 'unsupported'
+          ? 'Page not supported'
+          : llmStatus === 'failed'
+            ? 'Copy failed'
+            : 'Copy for LLM'
 
   return (
     <div className="popup">
@@ -239,6 +279,28 @@ export function Popup() {
             <MarkdownLogo size={18} weight="bold" />
           )}
           <span>{mdLabel}</span>
+        </button>
+
+        <button
+          className="popup-btn"
+          onClick={handleCopyLlm}
+          disabled={llmStatus === 'working'}
+          style={
+            llmStatus === 'done'
+              ? { background: 'var(--color-success)', borderColor: 'var(--color-success)', color: '#fff' }
+              : llmStatus === 'working'
+                ? { opacity: 0.75 }
+                : undefined
+          }
+        >
+          {llmStatus === 'working' ? (
+            <CircleNotch size={18} weight="bold" className="animate-spin" />
+          ) : llmStatus === 'done' ? (
+            <Check size={18} weight="bold" />
+          ) : (
+            <Sparkle size={18} weight="fill" />
+          )}
+          <span>{llmLabel}</span>
         </button>
 
         <button className="popup-btn" onClick={handleLastScan}>

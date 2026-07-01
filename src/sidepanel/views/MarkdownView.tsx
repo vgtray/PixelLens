@@ -14,11 +14,13 @@ import {
   Image as ImageIcon,
   Table,
   Code,
+  Sparkle,
 } from '@phosphor-icons/react'
 import { usePanelStore } from '../store'
 import { sendMessage } from '@/lib/messaging'
 import { MessageType } from '@/types/messages'
 import { copyToClipboard, downloadMarkdown } from '@/lib/export'
+import { buildLlmBundle } from '@/lib/llm-bundle'
 import type { MarkdownFrontmatter, MarkdownResult } from '@/types/markdown'
 import MarkdownPreview from '../components/MarkdownPreview'
 
@@ -59,7 +61,9 @@ function MarkdownView() {
   const setResult = usePanelStore((s) => s.setMarkdownResult)
   const setLoading = usePanelStore((s) => s.setMarkdownLoading)
   const setError = usePanelStore((s) => s.setMarkdownError)
+  const designSystem = usePanelStore((s) => s.designSystem)
   const [copied, setCopied] = useState(false)
+  const [copiedLlm, setCopiedLlm] = useState(false)
 
   const handleGenerate = useCallback(async () => {
     setLoading(true)
@@ -180,6 +184,13 @@ function MarkdownView() {
     downloadMarkdown(deriveFilename(fm), result.fullDocument)
   }
 
+  const handleCopyLlm = async () => {
+    const bundle = buildLlmBundle({ markdown: result, designSystem })
+    await copyToClipboard(bundle)
+    setCopiedLlm(true)
+    setTimeout(() => setCopiedLlm(false), 1500)
+  }
+
   return (
     <div className="flex flex-col h-full">
       {/* Meta header — frontmatter + stats */}
@@ -234,26 +245,40 @@ function MarkdownView() {
       </div>
 
       {/* Actions */}
-      <div className="shrink-0 p-3 border-t border-panel-border flex gap-2">
+      <div className="shrink-0 p-3 border-t border-panel-border flex flex-col gap-2">
+        {/* Hero action — the headline feature: one paste-ready document for an AI. */}
         <button
-          onClick={handleCopy}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
-            copied
+          onClick={handleCopyLlm}
+          className={`w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
+            copiedLlm
               ? 'bg-success text-white'
               : 'bg-panel-accent text-white hover:bg-panel-accent-hover'
           }`}
         >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? 'Copied!' : 'Copy Markdown'}
+          {copiedLlm ? <Check size={14} /> : <Sparkle size={14} weight="fill" />}
+          {copiedLlm ? 'Copied for LLM!' : 'Copy for LLM'}
         </button>
-        <button
-          onClick={handleDownload}
-          aria-label="Download Markdown file"
-          className="px-3 py-2 rounded-lg border border-panel-border text-panel-text-dim text-[12px] font-medium hover:bg-panel-surface hover:text-panel-text transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
-          title="Download .md"
-        >
-          <DownloadSimple size={14} />
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleCopy}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
+              copied
+                ? 'bg-success text-white'
+                : 'bg-panel-surface border border-panel-border text-panel-text hover:border-panel-accent'
+            }`}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Copied!' : 'Copy Markdown'}
+          </button>
+          <button
+            onClick={handleDownload}
+            aria-label="Download Markdown file"
+            className="px-3 py-2 rounded-lg border border-panel-border text-panel-text-dim text-[12px] font-medium hover:bg-panel-surface hover:text-panel-text transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
+            title="Download .md"
+          >
+            <DownloadSimple size={14} />
+          </button>
+        </div>
       </div>
     </div>
   )
