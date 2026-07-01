@@ -12,6 +12,8 @@ import {
   Prohibit,
   Database,
   TreeStructure,
+  Lightning,
+  Browser,
 } from '@phosphor-icons/react'
 import { usePanelStore } from '../store'
 import { sendMessage } from '@/lib/messaging'
@@ -52,6 +54,49 @@ function formatSkipReason(reason: string): string {
   }
 }
 
+// Fast (fetch server HTML) vs Full (navigate each page in a real background tab so the
+// JS runs, then capture the RENDERED DOM). Full is the fix for JS-rendered SPAs whose
+// initial HTML is an empty shell. Local UI state — passed in the CRAWL_SITE payload.
+function RenderModeToggle({
+  value,
+  onChange,
+}: {
+  value: 'fast' | 'full'
+  onChange: (v: 'fast' | 'full') => void
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Render mode"
+      className="flex items-center gap-1 p-0.5 rounded-lg bg-panel-surface border border-panel-border"
+    >
+      {(
+        [
+          { value: 'fast', label: 'Fast', icon: Lightning },
+          { value: 'full', label: 'Full', icon: Browser },
+        ] as const
+      ).map(({ value: v, label, icon: Icon }) => {
+        const isActive = value === v
+        return (
+          <button
+            key={v}
+            type="button"
+            onClick={() => onChange(v)}
+            aria-pressed={isActive}
+            title={v === 'fast' ? 'Fetch server HTML (fast)' : 'Render in a real browser tab (handles SPAs)'}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg ${
+              isActive ? 'bg-panel-accent text-white' : 'text-panel-text-dim hover:text-panel-text'
+            }`}
+          >
+            <Icon size={13} weight={isActive ? 'fill' : 'regular'} />
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function CrawlView() {
   const running = usePanelStore((s) => s.crawlRunning)
   const progress = usePanelStore((s) => s.crawlProgress)
@@ -66,16 +111,27 @@ function CrawlView() {
   const respectRobots = usePanelStore((s) => s.crawlRespectRobots)
   const setRespectRobots = usePanelStore((s) => s.setCrawlRespectRobots)
   const [copied, setCopied] = useState(false)
+  // Render mode is LOCAL (not persisted in the store): Fast (fetch) vs Full (real tab).
+  const [renderMode, setRenderMode] = useState<'fast' | 'full'>('fast')
+  // Mode the currently-shown result was crawled with — drives the "empty → try Full" hint.
+  const [resultMode, setResultMode] = useState<'fast' | 'full'>('fast')
 
   const handleStart = useCallback(async () => {
     setRunning(true)
     setError(null)
     setResult(null)
     setProgress(null)
+    // Fige le mode utilisé pour CE crawl : le résultat qui reviendra sera jugé (hint
+    // empty→Full) selon ce mode, même si l'utilisateur bascule le toggle entre-temps.
+    setResultMode(renderMode)
     try {
       // startUrl vide : le content script fait autorité et utilise location.href de
       // l'onglet courant (le panel n'a pas forcément accès à tab.url).
-      const res = await sendMessage(MessageType.CRAWL_SITE, { startUrl: '', respectRobots })
+      const res = await sendMessage(MessageType.CRAWL_SITE, {
+        startUrl: '',
+        respectRobots,
+        renderMode,
+      })
       if (!res?.success) {
         setRunning(false)
         setError('unsupported')
@@ -85,7 +141,7 @@ function CrawlView() {
       setRunning(false)
       setError('failed')
     }
-  }, [setRunning, setError, setResult, setProgress, respectRobots])
+  }, [setRunning, setError, setResult, setProgress, respectRobots, renderMode])
 
   const handleStop = useCallback(() => {
     // Annulation coopérative : le crawl finit la page en cours puis renvoie le document
@@ -189,8 +245,14 @@ function CrawlView() {
           >
             Crawl entire site
           </button>
+          <div className="mt-4 flex flex-col gap-1.5">
+            <span className="text-[10px] text-panel-text-dim uppercase tracking-wide">Render</span>
+            <RenderModeToggle value={renderMode} onChange={setRenderMode} />
+          </div>
           <p className="text-[10px] text-panel-text-dim/80 leading-relaxed mt-4">
-            {"Reads each page's initial HTML — client-rendered SPAs may come out partial."}
+            {renderMode === 'fast'
+              ? "Fast reads each page's initial HTML — client-rendered SPAs may come out partial."
+              : 'Full opens each page in a real background tab so the JS runs, then captures the rendered DOM. Slower, but handles SPAs.'}
           </p>
         </div>
       </div>
@@ -206,6 +268,8 @@ function CrawlView() {
     .filter(([, n]) => n > 0)
     .sort((a, b) => b[1] - a[1])
   const robotsSkipped = result.skippedReasons.robots ?? 0
+  // Empty conversions in FAST mode are the signal that the site is JS-rendered → suggest Full.
+  const emptySkipped = result.skippedReasons.empty ?? 0
   const preview =
     result.document.length > PREVIEW_LIMIT
       ? result.document.slice(0, PREVIEW_LIMIT) +
@@ -293,6 +357,14 @@ function CrawlView() {
           </p>
         )}
 
+        {resultMode === 'fast' && emptySkipped > 0 && (
+          <p className="text-[10px] text-panel-accent/90 mt-1.5 leading-relaxed">
+            {emptySkipped.toLocaleString()} empty page{emptySkipped === 1 ? '' : 's'} — this site
+            renders with JavaScript. Switch “Render” to <span className="font-medium">Full</span>{' '}
+            below and crawl again.
+          </p>
+        )}
+
         {stats.pageCount === 0 && stats.skippedCount === 0 && (
           <p className="text-[10px] text-panel-text-dim mt-2 leading-relaxed">
             No pages could be converted — the site may be client-rendered (its initial HTML
@@ -308,6 +380,15 @@ function CrawlView() {
 
       {/* Actions */}
       <div className="shrink-0 p-3 border-t border-panel-border flex flex-col gap-2">
+        {/* Render mode — Fast (fetch) vs Full (real browser tab). Takes effect on the next
+            crawl (Crawl again). Full is the fix for JS-rendered SPAs. */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[11px] text-panel-text-dim shrink-0">Render</span>
+          <div className="w-[140px]">
+            <RenderModeToggle value={renderMode} onChange={setRenderMode} />
+          </div>
+        </div>
+
         {/* Respect robots.txt — ON by default (safe). Turn OFF to include pages that
             robots.txt blocks: this is a human converting pages they can already see,
             not an indexing crawler. Takes effect on the next crawl (Crawl again). */}

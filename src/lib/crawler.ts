@@ -14,9 +14,13 @@
 // content script ET en jsdom) : tout l'I/O (fetch) et la conversion HTML→Markdown sont
 // INJECTÉS via `CrawlDeps`, ce qui rend l'orchestration entièrement testable hors réseau.
 //
-// LIMITE CONNUE (V1) : rendu fetch-first. On parse le HTML initial renvoyé par le serveur.
-// Les SPA rendues 100% côté client (JS) ne livrent que leur HTML de démarrage (souvent
-// vide) — leur contenu réel n'est pas capturé. Mode onglet = V2 (non implémenté).
+// MODES DE RENDU :
+//   - Fast (défaut) : rendu fetch-first. On parse le HTML initial renvoyé par le serveur
+//     (deps.fetchText + deps.convert). Les SPA rendues 100% côté client ne livrent que
+//     leur shell de démarrage (souvent vide → skip `empty`).
+//   - Full : si `deps.renderPage` est fourni, le contenu de CHAQUE page vient d'une
+//     NAVIGATION réelle dans un onglet (DOM rendu, JS exécuté) — voir lib/tab-render et le
+//     service worker. La découverte (robots.txt / sitemap.xml) reste en fetch same-origin.
 
 import type {
   CrawlDiscovery,
@@ -25,6 +29,7 @@ import type {
   CrawlProgress,
   CrawlResult,
   FetchTextResult,
+  RenderPageResult,
   SkipReason,
   SkipReasonCounts,
 } from '@/types/crawl'
@@ -45,6 +50,12 @@ export interface CrawlDeps {
   fetchText: (url: string) => Promise<FetchTextResult>
   /** Convertit le HTML d'une page en Markdown ; `null` si rien d'exploitable. */
   convert: (html: string, url: string) => CrawlPageResult | null
+  /**
+   * Mode Full (optionnel) : rend UNE page dans un onglet réel et renvoie son Markdown
+   * (DOM RENDU) + les liens du DOM (pour le BFS). Quand fourni, il REMPLACE fetchText+
+   * convert pour le CONTENU des pages ; la découverte robots/sitemap reste en fetch.
+   */
+  renderPage?: (url: string) => Promise<RenderPageResult>
   onProgress?: (progress: CrawlProgress) => void
   /** Annulation coopérative : interrogé avant chaque page. */
   shouldStop?: () => boolean
@@ -366,10 +377,14 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
     lastSkipReason = reason
   }
 
-  // Traite une URL : garde same-site + robots, fetch, convert. Renvoie le HTML
-  // (pour l'expansion de liens en BFS) ou null si la page a été ignorée — avec, dans
-  // ce cas, une RAISON explicite enregistrée dans skippedReasons.
-  const processOne = async (url: string, total: number): Promise<string | null> => {
+  // Résultat d'une page traitée avec succès : de quoi étendre le BFS. Fast = HTML serveur
+  // (les liens en seront extraits à la demande) ; Full = liens déjà collectés du DOM rendu.
+  type Processed = { html: string } | { links: string[] }
+
+  // Traite une URL : garde same-site + robots, puis récupère son CONTENU. Renvoie de quoi
+  // étendre le BFS (`html` en mode Fast, `links` du DOM rendu en mode Full) ou null si la
+  // page a été ignorée — avec, dans ce cas, une RAISON explicite dans skippedReasons.
+  const processOne = async (url: string, total: number): Promise<Processed | null> => {
     if (!sameSite(url, origin)) {
       skip(url, 'cross-origin')
       return null
@@ -379,6 +394,26 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
       return null
     }
     emit(url, total)
+
+    // Mode Full : le contenu vient d'une NAVIGATION réelle (DOM rendu), pas du HTML serveur.
+    // Le BFS s'étend alors depuis les liens du DOM rendu (renvoyés par renderPage).
+    if (deps.renderPage) {
+      const rendered = await deps.renderPage(url)
+      if (!rendered.ok) {
+        skip(url, rendered.reason)
+        return null
+      }
+      if (!rendered.page.markdown.trim()) {
+        skip(url, 'empty')
+        return null
+      }
+      pages.push(rendered.page)
+      emit(url, total)
+      await delay(delayMs)
+      return { links: rendered.links }
+    }
+
+    // Mode Fast : HTML initial du serveur (fetch same-origin) → conversion DOMParser.
     const res = await fetchTextSafe(url)
     if (!res.ok) {
       skip(url, res.reason)
@@ -393,7 +428,7 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
     pages.push(page)
     emit(url, total)
     await delay(delayMs)
-    return html
+    return { html }
   }
 
   // --- Découverte : sitemap.xml d'abord ---
@@ -429,9 +464,11 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
       if (visited.has(url)) continue
       visited.add(url)
       const total = Math.min(pages.length + queue.length + 1, maxPages)
-      const html = await processOne(url, total)
-      if (html && depth < maxDepth) {
-        for (const link of extractLinks(html, url)) {
+      const processed = await processOne(url, total)
+      if (processed && depth < maxDepth) {
+        // Fast : liens extraits du HTML serveur. Full : liens déjà collectés du DOM rendu.
+        const links = 'links' in processed ? processed.links : extractLinks(processed.html, url)
+        for (const link of links) {
           const n = normalizeUrl(link)
           if (sameSite(n, origin) && !visited.has(n)) {
             queue.push({ url: n, depth: depth + 1 })

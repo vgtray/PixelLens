@@ -4,12 +4,15 @@ import { usePanelStore } from '../store'
 import ExportButton from '../components/ExportButton'
 import ColorSwatch from '../components/ColorSwatch'
 import ShadowPreview from '../components/ShadowPreview'
+import StaleScanBanner from '../components/StaleScanBanner'
+import { isDifferentHost } from '@/lib/url'
 import type { DesignSystem } from '@/types/design-system'
 
 function DesignSystemView() {
   const designSystem = usePanelStore((s) => s.designSystem)
   const setDesignSystem = usePanelStore((s) => s.setDesignSystem)
   const setMode = usePanelStore((s) => s.setMode)
+  const activeTabUrl = usePanelStore((s) => s.activeTabUrl)
 
   if (!designSystem) {
     return (
@@ -49,8 +52,15 @@ function DesignSystemView() {
     setDesignSystem(updated)
   }
 
+  // Flag a design system restored from another site — the canonical scan CTA
+  // (with progress + error handling) lives in ScanView, so re-scan routes there.
+  const stale = isDifferentHost(designSystem.metadata.url, activeTabUrl)
+
   return (
     <div className="flex flex-col h-full">
+      {stale && (
+        <StaleScanBanner scanUrl={designSystem.metadata.url} onRescan={() => setMode('scan')} />
+      )}
       {/* Header with export */}
       <div className="shrink-0 px-3 py-2.5 border-b border-panel-border bg-panel-surface/50 flex items-center justify-between">
         <div>

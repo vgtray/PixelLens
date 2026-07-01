@@ -14,6 +14,7 @@ import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
 import { MessageType } from '@/types/messages'
 import { getDesignSystems } from '@/lib/storage'
+import { getHost } from '@/lib/url'
 import InspectorView from './views/InspectorView'
 import ScanView from './views/ScanView'
 import DesignSystemView from './views/DesignSystemView'
@@ -60,6 +61,9 @@ function App() {
   const setCrawlResult = usePanelStore((s) => s.setCrawlResult)
   const setCrawlRunning = usePanelStore((s) => s.setCrawlRunning)
   const setCrawlExportMode = usePanelStore((s) => s.setCrawlExportMode)
+  const setActiveTabUrl = usePanelStore((s) => s.setActiveTabUrl)
+  const activeTabUrl = usePanelStore((s) => s.activeTabUrl)
+  const history = usePanelStore((s) => s.history)
 
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const indicatorRef = useRef<HTMLDivElement>(null)
@@ -120,6 +124,60 @@ function App() {
       cancelled = true
     }
   }, [hasHydrated])
+
+  // Track the URL of the tab currently in front of the user so the views can
+  // tell whether a restored scan/markdown belongs to the page on screen (see
+  // StaleScanBanner). Reading tab.url relies on the activeTab grant from the
+  // action click that opened the panel; a tab the extension has no host access
+  // to reports url=undefined, in which case we store null (unknown) and the
+  // views won't flag a false mismatch. Runs on mount, then follows tab switches
+  // and in-tab navigations (incl. SPA route changes) while the panel stays open.
+  useEffect(() => {
+    let cancelled = false
+    const readActiveTab = async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (!cancelled) setActiveTabUrl(tab?.url ?? null)
+      } catch {
+        if (!cancelled) setActiveTabUrl(null)
+      }
+    }
+    void readActiveTab()
+    const onActivated = () => void readActiveTab()
+    const onUpdated = (
+      _tabId: number,
+      changeInfo: chrome.tabs.OnUpdatedInfo,
+      tab: chrome.tabs.Tab,
+    ) => {
+      // React only to a URL change on the *active* tab — a full navigation or an
+      // SPA route push both surface here. Ignore background-tab churn.
+      if (tab.active && changeInfo.url) void readActiveTab()
+    }
+    chrome.tabs.onActivated.addListener(onActivated)
+    chrome.tabs.onUpdated.addListener(onUpdated)
+    return () => {
+      cancelled = true
+      chrome.tabs.onActivated.removeListener(onActivated)
+      chrome.tabs.onUpdated.removeListener(onUpdated)
+    }
+  }, [setActiveTabUrl])
+
+  // Reconcile the shown design system with the active tab. When we know the host
+  // on screen, prefer the most recent scan of THAT host — so switching to (or
+  // reopening on) a previously scanned site restores its scan instead of
+  // whatever was scanned last globally. If nothing matches we leave the current
+  // scan in place and the stale-scan banner flags the host mismatch. Skipped
+  // while the active URL is unknown, so it can never wrongly override the scan.
+  useEffect(() => {
+    if (!hasHydrated) return
+    const activeHost = getHost(activeTabUrl)
+    if (!activeHost) return
+    const current = usePanelStore.getState().designSystem
+    // Already showing a scan of the active host → nothing to do.
+    if (current && getHost(current.metadata.url) === activeHost) return
+    const match = history.find((d) => getHost(d.metadata.url) === activeHost)
+    if (match) usePanelStore.getState().setDesignSystem(match)
+  }, [hasHydrated, activeTabUrl, history])
 
   // GSAP sliding indicator. `hasHydrated` is a dependency so the indicator is
   // (re)positioned on the very paint where the restored activeMode lands, not a

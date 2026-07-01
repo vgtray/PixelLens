@@ -23,6 +23,8 @@ import { copyToClipboard, downloadMarkdown } from '@/lib/export'
 import { buildLlmBundle } from '@/lib/llm-bundle'
 import type { MarkdownFrontmatter, MarkdownResult } from '@/types/markdown'
 import MarkdownPreview from '../components/MarkdownPreview'
+import StaleScanBanner from '../components/StaleScanBanner'
+import { isDifferentHost } from '@/lib/url'
 
 // Build a safe .md filename from the page title (fallback: hostname).
 function slugify(value: string): string {
@@ -62,6 +64,7 @@ function MarkdownView() {
   const setLoading = usePanelStore((s) => s.setMarkdownLoading)
   const setError = usePanelStore((s) => s.setMarkdownError)
   const designSystem = usePanelStore((s) => s.designSystem)
+  const activeTabUrl = usePanelStore((s) => s.activeTabUrl)
   const [copied, setCopied] = useState(false)
   const [copiedLlm, setCopiedLlm] = useState(false)
 
@@ -191,8 +194,15 @@ function MarkdownView() {
     setTimeout(() => setCopiedLlm(false), 1500)
   }
 
+  // The persisted markdown result may be from a previously visited site; flag
+  // it rather than presenting it as the current page's conversion.
+  const stale = isDifferentHost(fm.url, activeTabUrl)
+
   return (
     <div className="flex flex-col h-full">
+      {stale && (
+        <StaleScanBanner scanUrl={fm.url} onRescan={handleGenerate} action="Convert" />
+      )}
       {/* Meta header — frontmatter + stats */}
       <div className="shrink-0 px-3 py-3 border-b border-panel-border">
         <div className="flex items-start justify-between gap-2">

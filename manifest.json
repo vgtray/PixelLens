@@ -12,6 +12,7 @@
   "permissions": [
     "activeTab",
     "scripting",
+    "tabs",
     "sidePanel",
     "storage",
     "clipboardWrite"

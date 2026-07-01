@@ -5,10 +5,12 @@ import { prefersReducedMotion } from '../reducedMotion'
 import { usePanelStore } from '../store'
 import { sendMessage } from '@/lib/messaging'
 import { MessageType } from '@/types/messages'
+import { isDifferentHost } from '@/lib/url'
 import ColorPalette from '../components/ColorPalette'
 import TypeSpecimen from '../components/TypeSpecimen'
 import SpacingScale from '../components/SpacingScale'
 import ShadowPreview from '../components/ShadowPreview'
+import StaleScanBanner from '../components/StaleScanBanner'
 
 type ScanTab = 'colors' | 'fonts' | 'spacing' | 'shadows'
 
@@ -25,6 +27,7 @@ function ScanView() {
   const designSystem = usePanelStore((s) => s.designSystem)
   const setMode = usePanelStore((s) => s.setMode)
   const setScanError = usePanelStore((s) => s.setScanError)
+  const activeTabUrl = usePanelStore((s) => s.activeTabUrl)
   const [activeTab, setActiveTab] = useState<ScanTab>('colors')
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
@@ -200,8 +203,16 @@ function ScanView() {
     }
   }
 
+  // The shown design system is the last scan globally; if that came from a
+  // different host than the tab on screen, flag it instead of passing it off
+  // as the current page.
+  const stale = isDifferentHost(designSystem.metadata.url, activeTabUrl)
+
   return (
     <div className="flex flex-col h-full">
+      {stale && (
+        <StaleScanBanner scanUrl={designSystem.metadata.url} onRescan={handleStartScan} />
+      )}
       {/* Scan result tabs */}
       <nav className="relative flex border-b border-panel-border px-3 pt-1 shrink-0">
         <div

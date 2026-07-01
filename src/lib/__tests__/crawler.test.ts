@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import {
   normalizeUrl,
   sameOrigin,
@@ -12,7 +12,7 @@ import {
   type CrawlDeps,
 } from '../crawler'
 import { htmlDocumentToMarkdown } from '../markdown'
-import type { CrawlPageResult, FetchTextResult } from '@/types/crawl'
+import type { CrawlPageResult, FetchTextResult, RenderPageResult, SkipReason } from '@/types/crawl'
 
 // --- Helpers ------------------------------------------------------------------------
 
@@ -518,6 +518,140 @@ describe('crawlSite — breakdown des raisons de skip', () => {
     expect(reasons).toContain('robots')
   })
 })
+
+// --- crawlSite : mode Full (renderPage — rendu par onglet réel) ---------------------
+
+// Fake renderPage piloté par une table URL -> { md?, links?, reason? } : présent+md ->
+// succès (page + liens du DOM rendu), reason -> échec discriminé, absent -> network.
+function makeRenderPage(
+  table: Record<string, { md?: string; links?: string[]; reason?: SkipReason }>,
+) {
+  const calls: string[] = []
+  const renderPage = async (url: string): Promise<RenderPageResult> => {
+    calls.push(url)
+    const entry = table[url]
+    if (!entry || entry.reason) return { ok: false, reason: entry?.reason ?? 'network' }
+    return {
+      ok: true,
+      page: { url, title: `Rendered ${url}`, markdown: entry.md ?? `Body ${url}`, wordCount: 2 },
+      links: entry.links ?? [],
+    }
+  }
+  return { renderPage, calls }
+}
+
+describe('crawlSite — mode Full (renderPage)', () => {
+  it('prend le CONTENU des pages via renderPage, jamais via fetch/convert', async () => {
+    const fetchCalls: string[] = []
+    const fetchText = async (url: string): Promise<FetchTextResult> => {
+      fetchCalls.push(url)
+      if (url === 'https://spa.example/sitemap.xml') {
+        return {
+          ok: true,
+          text:
+            '<urlset><url><loc>https://spa.example/a</loc></url>' +
+            '<url><loc>https://spa.example/b</loc></url></urlset>',
+        }
+      }
+      return { ok: false, reason: 'network' } // robots.txt absent
+    }
+    // convert (le chemin Fast HTML→Markdown) renverrait « empty » sur une SPA : il ne doit
+    // JAMAIS être appelé en mode Full.
+    const convert = vi.fn(() => null)
+    const { renderPage, calls } = makeRenderPage({
+      'https://spa.example/': { md: 'Home rendered' },
+      'https://spa.example/a': { md: 'A rendered' },
+      'https://spa.example/b': { md: 'B rendered' },
+    })
+
+    const res = await crawlSite(
+      { startUrl: 'https://spa.example/', renderMode: 'full' },
+      { fetchText, convert, renderPage, delay: () => Promise.resolve() },
+    )
+
+    expect(res.stats.discovery).toBe('sitemap')
+    expect(sortedPageUrls(res.pages)).toEqual([
+      'https://spa.example/',
+      'https://spa.example/a',
+      'https://spa.example/b',
+    ])
+    // fetch ne touche QUE la découverte (robots + sitemap), pas les pages elles-mêmes.
+    expect(fetchCalls).toEqual([
+      'https://spa.example/robots.txt',
+      'https://spa.example/sitemap.xml',
+    ])
+    expect(convert).not.toHaveBeenCalled()
+    expect(calls).toContain('https://spa.example/a')
+  })
+
+  it('produit du Markdown NON vide là où le Fast donnait « empty » (cas SPA)', async () => {
+    const fetchText = async (url: string): Promise<FetchTextResult> =>
+      url === 'https://spa.example/sitemap.xml'
+        ? { ok: true, text: '<urlset><url><loc>https://spa.example/a</loc></url></urlset>' }
+        : { ok: false, reason: 'network' }
+    const { renderPage } = makeRenderPage({
+      'https://spa.example/': { md: '# Real home content' },
+      'https://spa.example/a': { md: '# Real A content' },
+    })
+
+    const res = await crawlSite(
+      { startUrl: 'https://spa.example/', renderMode: 'full' },
+      // convert renverrait null (shell vide) en Fast : ici on prouve que Full l'ignore.
+      { fetchText, convert: () => null, renderPage, delay: () => Promise.resolve() },
+    )
+
+    expect(res.pages).toHaveLength(2)
+    expect(res.pages.every((p) => p.markdown.trim().length > 0)).toBe(true)
+    expect(res.skippedReasons.empty ?? 0).toBe(0)
+  })
+
+  it('skippe une page dont le rendu échoue, avec sa raison (timeout)', async () => {
+    const fetchText = async (url: string): Promise<FetchTextResult> =>
+      url === 'https://spa.example/sitemap.xml'
+        ? {
+            ok: true,
+            text:
+              '<urlset><url><loc>https://spa.example/slow</loc></url>' +
+              '<url><loc>https://spa.example/ok</loc></url></urlset>',
+          }
+        : { ok: false, reason: 'network' }
+    const { renderPage } = makeRenderPage({
+      'https://spa.example/': { md: 'Home' },
+      'https://spa.example/slow': { reason: 'timeout' },
+      'https://spa.example/ok': { md: 'OK' },
+    })
+
+    const res = await crawlSite(
+      { startUrl: 'https://spa.example/', renderMode: 'full' },
+      { fetchText, convert: () => null, renderPage, delay: () => Promise.resolve() },
+    )
+
+    expect(res.skippedReasons.timeout).toBe(1)
+    expect(sortedPageUrls(res.pages)).toEqual(['https://spa.example/', 'https://spa.example/ok'])
+  })
+
+  it('sans sitemap, étend le BFS via les liens du DOM RENDU', async () => {
+    // Ni robots ni sitemap : découverte par BFS. Les liens viennent du DOM rendu.
+    const fetchText = async (): Promise<FetchTextResult> => ({ ok: false, reason: 'network' })
+    const { renderPage, calls } = makeRenderPage({
+      'https://spa.example/': { md: 'Home', links: ['https://spa.example/deep'] },
+      'https://spa.example/deep': { md: 'Deep', links: [] },
+    })
+
+    const res = await crawlSite(
+      { startUrl: 'https://spa.example/', renderMode: 'full' },
+      { fetchText, convert: () => null, renderPage, delay: () => Promise.resolve() },
+    )
+
+    expect(res.stats.discovery).toBe('crawl')
+    expect(sortedPageUrls(res.pages)).toEqual([
+      'https://spa.example/',
+      'https://spa.example/deep',
+    ])
+    expect(calls).toContain('https://spa.example/deep')
+  })
+})
+
 
 // --- Réutilisation du moteur Markdown sur un Document fetché -------------------------
 

@@ -21,6 +21,16 @@ export interface CrawlOptions {
    * crawlers d'indexation, pas cet outil manuel).
    */
   respectRobots?: boolean
+  /**
+   * Mode de rendu du crawl (défaut `fast`) :
+   *  - `fast` : fetch du HTML initial renvoyé par le serveur (rapide, sans onglet). Les
+   *    SPA rendues 100% en JS ne livrent qu'un shell vide → pages `empty`.
+   *  - `full` : NAVIGATION réelle de chaque page dans un onglet en arrière-plan — le
+   *    navigateur exécute le JS — puis capture du DOM RENDU. Plus lent, mais convertit
+   *    les SPA (et réutilise la session/les cookies de l'utilisateur). Orchestré par le
+   *    service worker (seul à avoir chrome.tabs), page par page.
+   */
+  renderMode?: 'fast' | 'full'
 }
 
 /**
@@ -77,6 +87,17 @@ export interface CrawlPageResult {
   markdown: string
   wordCount: number
 }
+
+/**
+ * Résultat du rendu d'UNE page en mode Full (navigation réelle dans un onglet). Injecté
+ * dans le crawler via `CrawlDeps.renderPage`. Discriminé comme FetchTextResult :
+ *  - succès : la page convertie (Markdown issu du DOM RENDU) + les liens absolus du DOM
+ *    rendu (permettent au BFS de s'étendre quand il n'y a pas de sitemap) ;
+ *  - échec  : une raison explicite (timeout, network, empty…) remontée au breakdown.
+ */
+export type RenderPageResult =
+  | { ok: true; page: CrawlPageResult; links: string[] }
+  | { ok: false; reason: SkipReason }
 
 /** Stratégie de découverte des URLs effectivement employée. */
 export type CrawlDiscovery = 'sitemap' | 'crawl'

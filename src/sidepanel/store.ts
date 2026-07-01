@@ -54,6 +54,12 @@ interface PanelState {
   // default state first and then snaps to the restored one (see App.tsx).
   // Never persisted (excluded from `partialize`) — purely runtime state.
   hasHydrated: boolean
+  // URL of the tab currently in front of the user, tracked live from
+  // chrome.tabs (see App.tsx). Views compare it against the host their scan /
+  // markdown came from, so a restored result from another site is flagged as
+  // stale instead of shown as current. `null` = unknown (couldn't read the tab
+  // URL, e.g. no host permission for it). Never persisted — purely runtime.
+  activeTabUrl: string | null
 
   setMode: (mode: PanelMode) => void
   setInspectedElement: (el: InspectedElement | null) => void
@@ -74,6 +80,7 @@ interface PanelState {
   setCrawlExportMode: (mode: CrawlExportMode) => void
   setCrawlRespectRobots: (respect: boolean) => void
   setHasHydrated: (hydrated: boolean) => void
+  setActiveTabUrl: (url: string | null) => void
 }
 
 export const usePanelStore = create<PanelState>()(
@@ -96,6 +103,7 @@ export const usePanelStore = create<PanelState>()(
       crawlExportMode: 'single',
       crawlRespectRobots: true,
       hasHydrated: false,
+      activeTabUrl: null,
 
       setMode: (mode) => set({ activeMode: mode }),
       setInspectedElement: (el) => set({ inspectedElement: el }),
@@ -117,6 +125,7 @@ export const usePanelStore = create<PanelState>()(
       setCrawlExportMode: (mode) => set({ crawlExportMode: mode }),
       setCrawlRespectRobots: (respect) => set({ crawlRespectRobots: respect }),
       setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
+      setActiveTabUrl: (url) => set({ activeTabUrl: url }),
     }),
     {
       name: PANEL_STATE_STORAGE_KEY,
