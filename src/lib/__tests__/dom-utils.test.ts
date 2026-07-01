@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { isElementVisible, isPixelLensElement, getElementPath } from '../dom-utils';
+import { isElementVisible, isPixelLensElement, getElementPath, getVisibleElements } from '../dom-utils';
 
 function mockRect(el: Element, width: number, height: number) {
   vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
@@ -129,5 +129,71 @@ describe('getElementPath', () => {
     document.body.appendChild(parent);
     const path = getElementPath(child2);
     expect(path).toContain('nth-of-type(2)');
+  });
+});
+
+
+describe('getVisibleElements', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    document.body.innerHTML = '';
+  });
+
+  it('scans <html> and <body> (page background + base typography)', () => {
+    document.body.innerHTML = '<div id="child"></div>';
+    const child = document.getElementById('child')!;
+    mockRect(document.documentElement, 1000, 800);
+    mockRect(document.body, 1000, 800);
+    mockRect(child, 100, 50);
+
+    const els = getVisibleElements();
+    expect(els).toContain(document.documentElement);
+    expect(els).toContain(document.body);
+    expect(els).toContain(child);
+  });
+
+  it('keeps visible children of a display:contents / zero-box wrapper', () => {
+    document.body.innerHTML = '<div id="wrap"><span id="leaf">x</span></div>';
+    const wrap = document.getElementById('wrap')!;
+    const leaf = document.getElementById('leaf')!;
+    wrap.style.display = 'contents';
+    mockRect(document.documentElement, 1000, 800);
+    mockRect(document.body, 1000, 800);
+    mockRect(wrap, 0, 0); // display:contents paints no box
+    mockRect(leaf, 40, 20);
+
+    const els = getVisibleElements();
+    expect(els).toContain(leaf); // subtree preserved (FILTER_SKIP, not REJECT)
+    expect(els).not.toContain(wrap); // wrapper itself is skipped
+  });
+
+  it('prunes a display:none subtree entirely', () => {
+    document.body.innerHTML = '<div id="hidden"><span id="deep">x</span></div>';
+    const hidden = document.getElementById('hidden')!;
+    const deep = document.getElementById('deep')!;
+    hidden.style.display = 'none';
+    mockRect(document.documentElement, 1000, 800);
+    mockRect(document.body, 1000, 800);
+    mockRect(deep, 40, 20);
+
+    const els = getVisibleElements();
+    expect(els).not.toContain(hidden);
+    expect(els).not.toContain(deep); // REJECT prunes the whole subtree
+  });
+
+  it('keeps a visible child under a visibility:hidden parent', () => {
+    document.body.innerHTML = '<div id="vh"><span id="shown">x</span></div>';
+    const vh = document.getElementById('vh')!;
+    const shown = document.getElementById('shown')!;
+    vh.style.visibility = 'hidden';
+    shown.style.visibility = 'visible';
+    mockRect(document.documentElement, 1000, 800);
+    mockRect(document.body, 1000, 800);
+    mockRect(vh, 100, 40);
+    mockRect(shown, 40, 20);
+
+    const els = getVisibleElements();
+    expect(els).not.toContain(vh); // hidden node skipped
+    expect(els).toContain(shown); // but its visible child is kept
   });
 });

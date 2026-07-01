@@ -23,19 +23,44 @@ export function isElementVisible(el: Element): boolean {
   return true
 }
 
-export function getVisibleElements(root: Element = document.body): Element[] {
+// Tags that never carry visual design tokens; rejecting them prunes their subtree.
+const NON_VISUAL_TAGS = new Set([
+  'script', 'style', 'noscript', 'link', 'meta', 'head', 'title', 'base', 'template',
+])
+
+// Decide how the TreeWalker should treat an element:
+// - REJECT: prune the element AND its whole subtree (display:none / non-visual tags).
+// - SKIP:   drop the element itself but KEEP walking its children. Used for nodes
+//           that paint nothing yet may wrap visible descendants — visibility:hidden
+//           (a child can re-declare visibility:visible), opacity:0, and above all
+//           `display:contents` / zero-box wrappers (0x0 rect).
+// - ACCEPT: collect the element and keep walking its children.
+function classifyElement(el: Element): number {
+  const tag = el.tagName.toLowerCase()
+  if (NON_VISUAL_TAGS.has(tag)) return NodeFilter.FILTER_REJECT
+
+  const style = window.getComputedStyle(el)
+  if (style.display === 'none') return NodeFilter.FILTER_REJECT
+  if (style.visibility === 'hidden' || style.opacity === '0') return NodeFilter.FILTER_SKIP
+
+  const rect = el.getBoundingClientRect()
+  if (rect.width === 0 && rect.height === 0) return NodeFilter.FILTER_SKIP
+
+  return NodeFilter.FILTER_ACCEPT
+}
+
+export function getVisibleElements(root: Element = document.documentElement): Element[] {
   const elements: Element[] = []
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
-    acceptNode(node) {
-      const el = node as Element
-      if (!isElementVisible(el)) return NodeFilter.FILTER_REJECT
-      const tag = el.tagName.toLowerCase()
-      if (tag === 'script' || tag === 'style' || tag === 'noscript' || tag === 'link' || tag === 'meta') {
-        return NodeFilter.FILTER_REJECT
-      }
-      return NodeFilter.FILTER_ACCEPT
-    },
+    acceptNode: (node) => classifyElement(node as Element),
   })
+
+  // A TreeWalker never emits its own root node, so evaluate it explicitly.
+  // With the root defaulting to <html>, this is what finally gets <html> and
+  // <body> scanned — the page background + base typography live there.
+  if (classifyElement(root) === NodeFilter.FILTER_ACCEPT) {
+    elements.push(root)
+  }
 
   let node: Node | null
   while ((node = walker.nextNode())) {

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Export, Check } from '@phosphor-icons/react'
 import gsap from 'gsap'
 import { formatExport } from '@/lib/design-tokens'
-import { copyToClipboard, downloadFile, generatePalettePNG } from '@/lib/export'
+import { copyToClipboard, generatePalettePNG } from '@/lib/export'
 import type { DesignSystem, ExportFormat } from '@/types/design-system'
 
 interface ExportButtonProps {

@@ -27,7 +27,7 @@ function highlightCSS(code: string): { html: string } {
     )
     // Selectors and braces
     .replace(
-      /^([.#\w][\w\-.*#\[\]=~|^$:, ]*)\s*\{/gm,
+      /^([.#\w][\w\-.*#[\]=~|^$:, ]*)\s*\{/gm,
       '<span class="text-panel-accent">$1</span> {',
     )
     // Strings

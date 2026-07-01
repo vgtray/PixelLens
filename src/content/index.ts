@@ -99,19 +99,134 @@ onMessage(MessageType.TOGGLE_GRID, (payload) => {
   }
 })
 
-onMessage(MessageType.SCAN_PAGE, (_payload, _sender, sendResponse) => {
+onMessage(MessageType.SCAN_PAGE, (_payload, _sender, _sendResponse) => {
   if (!scanner) {
     scanner = new PageScanner()
   }
 
-  scanner.scan((progress, phase) => {
-    sendMessage(MessageType.SCAN_PROGRESS, { progress, phase })
-  }).then((designSystem) => {
-    sendMessage(MessageType.SCAN_COMPLETE, { designSystem })
-  })
+  scanner
+    .scan((progress, phase) => {
+      sendMessage(MessageType.SCAN_PROGRESS, { progress, phase }).catch(() => {})
+    })
+    .then((designSystem) => {
+      sendMessage(MessageType.SCAN_COMPLETE, { designSystem }).catch(() => {})
+    })
+    .catch((err) => {
+      // Without this .catch a scanner rejection (broken page, extractor throwing)
+      // never emitted SCAN_COMPLETE, leaving the panel stuck on the spinner forever.
+      // Surface an explicit error state so it can drop the spinner and offer retry.
+      console.debug('[PixelLens]', (err as Error).message)
+      sendMessage(MessageType.SCAN_ERROR, undefined).catch(() => {})
+    })
 
   // Return true to keep the message channel open for async response
   return true
+})
+
+onMessage(MessageType.EXTRACT_MARKDOWN, (_payload, _sender, sendResponse) => {
+  // Lazy-load le moteur (turndown) uniquement à la demande — hors du bundle initial.
+  import('./scanner/MarkdownExtractor')
+    .then(({ MarkdownExtractor }) => {
+      const extractor = new MarkdownExtractor()
+      sendResponse(extractor.extract())
+    })
+    .catch((err) => console.debug('[PixelLens]', (err as Error).message))
+
+  // Return true to keep the message channel open for async response
+  return true
+})
+
+// --- Site crawl (CRAWL_SITE / STOP_CRAWL) ---
+//
+// Les fetch same-origin tournent ICI, dans le content script : il partage l'origine de
+// la page, donc fetch() n'est pas soumis à CORS et ne réclame aucune host_permission.
+// L'orchestration (BFS/sitemap, robots, bornes, dédup, annulation) vit dans lib/crawler ;
+// on lui injecte le fetch réel et la conversion HTML→Markdown (htmlDocumentToMarkdown).
+// Limite V1 : si l'utilisateur quitte/recharge l'onglet, ce script meurt et le crawl
+// s'arrête (le panel restera alors sur la progression jusqu'à un nouveau lancement).
+let crawlAborted = false
+let crawlInProgress = false
+// Aborts the in-flight fetch the instant Stop is pressed (STOP_CRAWL) or the
+// per-request timeout fires. Previously `crawlAborted` was only read *between*
+// pages, so Stop had no effect during a pending request and a hung server froze
+// the whole crawl. This controller propagates the abort down to the live fetch.
+let crawlStopController: AbortController | null = null
+
+onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
+  // Ignore un second lancement tant qu'un crawl tourne (un seul à la fois par onglet).
+  if (crawlInProgress) {
+    sendResponse({ success: false })
+    return
+  }
+  crawlInProgress = true
+  crawlAborted = false
+  crawlStopController = new AbortController()
+
+  // Lazy-load : crawler + moteur Markdown (turndown) + fetch borné, hors du bundle
+  // content initial.
+  Promise.all([
+    import('@/lib/crawler'),
+    import('@/lib/markdown'),
+    import('@/lib/crawl-fetch'),
+  ])
+    .then(async ([{ crawlSite }, { htmlDocumentToMarkdown }, { fetchTextWithTimeout }]) => {
+      // Le content script fait autorité sur l'URL de départ : si le panel n'a pas pu
+      // fournir tab.url, on prend location.href de la page courante.
+      const startUrl = options.startUrl || location.href
+      const result = await crawlSite({ ...options, startUrl }, {
+        // Chaque requête a un timeout dur ET écoute le signal d'annulation global :
+        // Stop (STOP_CRAWL) abort() le fetch en vol, un timeout coupe un serveur muet.
+        // Une page en échec (timeout/abort/erreur) renvoie null → comptée « skipped »,
+        // le crawl continue.
+        fetchText: (url) =>
+          fetchTextWithTimeout(url, { signal: crawlStopController?.signal }),
+        convert: (html, url) => {
+          try {
+            const doc = new DOMParser().parseFromString(html, 'text/html')
+            const md = htmlDocumentToMarkdown(doc, url)
+            const body = md.markdown.trim()
+            if (!body) return null
+            return {
+              url,
+              title: md.frontmatter.title,
+              markdown: body,
+              wordCount: md.frontmatter.wordCount,
+            }
+          } catch {
+            return null
+          }
+        },
+        onProgress: (progress) => {
+          sendMessage(MessageType.CRAWL_PROGRESS, progress).catch(() => {})
+        },
+        shouldStop: () => crawlAborted,
+      })
+      sendMessage(MessageType.CRAWL_COMPLETE, { result }).catch(() => {})
+    })
+    .catch((err) => console.debug('[PixelLens]', (err as Error).message))
+    .finally(() => {
+      crawlInProgress = false
+      crawlStopController = null
+    })
+
+  // Ack immédiat de la prise en charge ; les résultats arrivent via CRAWL_PROGRESS/COMPLETE.
+  sendResponse({ success: true })
+  return true
+})
+
+onMessage(MessageType.STOP_CRAWL, (_payload, _sender, sendResponse) => {
+  crawlAborted = true
+  // Interrompt immédiatement le fetch en cours (sinon Stop n'agit qu'entre deux
+  // pages, et reste sans effet pendant une requête pendante).
+  crawlStopController?.abort()
+  sendResponse({ success: true })
+})
+
+// Liveness probe used by the service worker before forwarding a scan: lets it
+// detect a tab where this content script was never (re)injected (e.g. tabs
+// restored after a Chrome restart) and re-inject it before sending SCAN_PAGE.
+onMessage(MessageType.PING, (_payload, _sender, sendResponse) => {
+  sendResponse({ alive: true })
 })
 
 // Listen for mode changes dispatched from the toolbar UI (ContentApp)

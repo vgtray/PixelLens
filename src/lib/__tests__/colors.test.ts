@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   toHex,
+  tryToHex,
   toRgb,
   toHsl,
   isNeutral,
@@ -22,12 +23,58 @@ describe('toHex', () => {
     expect(hex).toBe('#00ff00');
   });
 
-  it('returns input for invalid color', () => {
-    expect(toHex('not-a-color')).toBe('not-a-color');
+  it('never round-trips an unparseable color as a fake hex', () => {
+    // Regression guard (was `toHex('not-a-color') === 'not-a-color'`): toHex used
+    // to return its input verbatim, so garbage leaked downstream as a fake token.
+    expect(toHex('not-a-color')).not.toBe('not-a-color');
+    expect(toHex('not-a-color')).toMatch(/^#[0-9a-f]{6}$/);
+    expect(tryToHex('not-a-color')).toBeNull();
   });
 
   it('passes through hex values', () => {
     expect(toHex('#abcdef')).toBe('#abcdef');
+  });
+});
+
+describe('modern CSS colors', () => {
+  it('parses oklch via chroma', () => {
+    expect(tryToHex('oklch(0.7 0.15 200)')).toBe('#00b9c3');
+  });
+
+  it('parses lab via chroma', () => {
+    expect(tryToHex('lab(50% 40 30)')).toBe('#bb5846');
+  });
+
+  it('parses hwb (which chroma 3.2.0 cannot)', () => {
+    expect(tryToHex('hwb(120 0% 0%)')).toBe('#00ff00');
+    expect(tryToHex('hwb(0 0% 0%)')).toBe('#ff0000');
+  });
+
+  it('parses color(srgb ...)', () => {
+    expect(tryToHex('color(srgb 0.5 0 0.5)')).toBe('#800080');
+    expect(tryToHex('color(srgb 1 1 1)')).toBe('#ffffff');
+  });
+
+  it('maps Display-P3 into sRGB (valid hex, never a black swatch)', () => {
+    const hex = tryToHex('color(display-p3 1 0 0)');
+    expect(hex).not.toBeNull();
+    expect(hex).toMatch(/^#[0-9a-f]{6}$/);
+    expect(hex).toBe('#ff0000');
+  });
+
+  it('parses color-mix(in srgb, ...)', () => {
+    expect(tryToHex('color-mix(in srgb, red, blue)')).toBe('#800080');
+    expect(tryToHex('color-mix(in srgb, white 25%, black)')).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('feeds a valid rgb/hsl for modern colors (no {0,0,0} fallback)', () => {
+    expect(toRgb('color(display-p3 1 0 0)')).toEqual({ r: 255, g: 0, b: 0 });
+    expect(toHsl('color(srgb 0.5 0 0.5)').s).toBeGreaterThan(0);
+  });
+
+  it('returns null for genuinely invalid input (jsdom has no canvas)', () => {
+    expect(tryToHex('definitely-not-a-color')).toBeNull();
+    expect(tryToHex('rgb(oops)')).toBeNull();
   });
 });
 
