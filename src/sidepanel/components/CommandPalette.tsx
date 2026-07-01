@@ -8,9 +8,11 @@ import {
   MarkdownLogo,
   GlobeHemisphereWest,
   GearSix,
+  CircleHalf,
+  FileZip,
   type Icon,
 } from '@phosphor-icons/react'
-import type { PanelMode } from '../store'
+import type { PanelMode, CrawlExportMode } from '../store'
 import { prefersReducedMotion } from '../reducedMotion'
 
 /**
@@ -68,6 +70,47 @@ export function createNavigationCommands(setMode: (mode: PanelMode) => void): Co
     { id: 'nav-export', label: 'Export tokens', icon: Export, group: 'Workspace', keywords: ['css', 'tailwind', 'json', 'download', 'variables'], run: go('export') },
     { id: 'nav-history', label: 'History', icon: ClockCounterClockwise, group: 'Workspace', keywords: ['recent', 'past', 'scans'], run: go('history') },
     { id: 'nav-settings', label: 'Settings', icon: GearSix, group: 'Workspace', keywords: ['preferences', 'config', 'options', 'theme'], run: go('settings') },
+  ]
+}
+
+/**
+ * Contrast checker destination (Analyze group). Split out as its own factory so
+ * it composes with the base registry via a spread in App.tsx.
+ */
+export function createContrastCommands(setMode: (mode: PanelMode) => void): Command[] {
+  return [
+    {
+      id: 'nav-contrast',
+      label: 'Contrast checker',
+      icon: CircleHalf,
+      group: 'Analyze',
+      keywords: ['wcag', 'a11y', 'accessibility', 'ratio', 'aa', 'aaa', 'readability', 'contrast'],
+      run: () => setMode('contrast'),
+    },
+  ]
+}
+
+/**
+ * "Crawl site → ZIP" accelerator (Convert group): presets the crawl export shape
+ * to a multi-file ZIP and jumps to the Crawl view. It does not auto-start the
+ * network crawl — the user still triggers it — so no surprise traffic fires.
+ */
+export function createCrawlZipCommands(
+  setMode: (mode: PanelMode) => void,
+  setCrawlExportMode: (mode: CrawlExportMode) => void,
+): Command[] {
+  return [
+    {
+      id: 'crawl-zip',
+      label: 'Crawl site → ZIP',
+      icon: FileZip,
+      group: 'Convert',
+      keywords: ['zip', 'archive', 'multi-file', 'pages', 'export', 'download', 'crawl'],
+      run: () => {
+        setCrawlExportMode('zip')
+        setMode('crawl')
+      },
+    },
   ]
 }
 

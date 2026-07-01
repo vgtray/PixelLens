@@ -8,6 +8,7 @@ import {
   MarkdownLogo,
   GlobeHemisphereWest,
   GearSix,
+  CircleHalf,
 } from '@phosphor-icons/react'
 import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
@@ -20,9 +21,15 @@ import ExportView from './views/ExportView'
 import HistoryView from './views/HistoryView'
 import MarkdownView from './views/MarkdownView'
 import CrawlView from './views/CrawlView'
+import ContrastCheckerView from './views/ContrastCheckerView'
 import SettingsView from './views/SettingsView'
 import PixelLensLogo from './components/PixelLensLogo'
-import CommandPalette, { createNavigationCommands, isMacPlatform } from './components/CommandPalette'
+import CommandPalette, {
+  createNavigationCommands,
+  createContrastCommands,
+  createCrawlZipCommands,
+  isMacPlatform,
+} from './components/CommandPalette'
 import { prefersReducedMotion } from './reducedMotion'
 
 const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass }[] = [
@@ -32,6 +39,7 @@ const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass 
 ]
 
 const FOOTER_TABS: { mode: PanelMode; icon: typeof Export; label: string }[] = [
+  { mode: 'contrast', icon: CircleHalf, label: 'Contrast checker' },
   { mode: 'export', icon: Export, label: 'Export' },
   { mode: 'markdown', icon: MarkdownLogo, label: 'Markdown' },
   { mode: 'crawl', icon: GlobeHemisphereWest, label: 'Crawl site' },
@@ -51,6 +59,7 @@ function App() {
   const setCrawlProgress = usePanelStore((s) => s.setCrawlProgress)
   const setCrawlResult = usePanelStore((s) => s.setCrawlResult)
   const setCrawlRunning = usePanelStore((s) => s.setCrawlRunning)
+  const setCrawlExportMode = usePanelStore((s) => s.setCrawlExportMode)
 
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const indicatorRef = useRef<HTMLDivElement>(null)
@@ -59,7 +68,14 @@ function App() {
   // Command palette: transient, LOCAL state only — it is an accelerator, never
   // part of the persisted panel envelope.
   const [paletteOpen, setPaletteOpen] = useState(false)
-  const commands = useMemo(() => createNavigationCommands(setMode), [setMode])
+  const commands = useMemo(
+    () => [
+      ...createNavigationCommands(setMode),
+      ...createContrastCommands(setMode),
+      ...createCrawlZipCommands(setMode, setCrawlExportMode),
+    ],
+    [setMode, setCrawlExportMode],
+  )
   const shortcutLabel = isMacPlatform() ? '⌘K' : 'Ctrl K'
 
   // Global ⌘K / Ctrl+K toggles the palette from anywhere in the panel.
@@ -228,6 +244,8 @@ function App() {
         return <ScanView />
       case 'design-system':
         return <DesignSystemView />
+      case 'contrast':
+        return <ContrastCheckerView />
       case 'export':
         return <ExportView />
       case 'history':

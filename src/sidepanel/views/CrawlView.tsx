@@ -8,6 +8,7 @@ import {
   Stop,
   ArrowClockwise,
   Files,
+  FileZip,
   Prohibit,
   Database,
   TreeStructure,
@@ -16,6 +17,7 @@ import { usePanelStore } from '../store'
 import { sendMessage } from '@/lib/messaging'
 import { MessageType } from '@/types/messages'
 import { copyToClipboard, downloadMarkdown } from '@/lib/export'
+import { downloadCrawlZip } from '@/lib/crawl-zip'
 import MarkdownPreview from '../components/MarkdownPreview'
 
 // Le download contient TOUT le document ; la preview est tronquée au-delà de ce seuil
@@ -37,6 +39,8 @@ function CrawlView() {
   const setProgress = usePanelStore((s) => s.setCrawlProgress)
   const setResult = usePanelStore((s) => s.setCrawlResult)
   const setError = usePanelStore((s) => s.setCrawlError)
+  const exportMode = usePanelStore((s) => s.crawlExportMode)
+  const setExportMode = usePanelStore((s) => s.setCrawlExportMode)
   const [copied, setCopied] = useState(false)
 
   const handleStart = useCallback(async () => {
@@ -193,7 +197,12 @@ function CrawlView() {
   }
 
   const handleDownload = () => {
-    downloadMarkdown(`${result.host}-site.md`, result.document)
+    if (exportMode === 'zip') {
+      // Multi-file archive: one .md per page + a linking index.md.
+      downloadCrawlZip(result)
+    } else {
+      downloadMarkdown(`${result.host}-site.md`, result.document)
+    }
   }
 
   return (
@@ -253,28 +262,61 @@ function CrawlView() {
       </div>
 
       {/* Actions */}
-      <div className="shrink-0 p-3 border-t border-panel-border flex gap-2">
-        <button
-          onClick={handleCopy}
-          disabled={stats.pageCount === 0}
-          className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
-            copied
-              ? 'bg-success text-white'
-              : 'bg-panel-accent text-white hover:bg-panel-accent-hover'
-          }`}
+      <div className="shrink-0 p-3 border-t border-panel-border flex flex-col gap-2">
+        {/* Export format — single concatenated .md vs a multi-file .zip. Additive:
+            Copy always yields the single document; only the download shape changes. */}
+        <div
+          role="group"
+          aria-label="Download format"
+          className="flex items-center gap-1 p-0.5 rounded-lg bg-panel-surface border border-panel-border"
         >
-          {copied ? <Check size={14} /> : <Copy size={14} />}
-          {copied ? 'Copied!' : 'Copy Markdown'}
-        </button>
-        <button
-          onClick={handleDownload}
-          disabled={stats.pageCount === 0}
-          aria-label="Download Markdown file"
-          className="px-3 py-2 rounded-lg border border-panel-border text-panel-text-dim text-[12px] font-medium hover:bg-panel-surface hover:text-panel-text transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
-          title="Download .md"
-        >
-          <DownloadSimple size={14} />
-        </button>
+          {([
+            { value: 'single', label: '1 file', icon: Files },
+            { value: 'zip', label: 'ZIP', icon: FileZip },
+          ] as const).map(({ value, label, icon: Icon }) => {
+            const isActive = exportMode === value
+            return (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setExportMode(value)}
+                aria-pressed={isActive}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-md text-[11px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg ${
+                  isActive
+                    ? 'bg-panel-accent text-white'
+                    : 'text-panel-text-dim hover:text-panel-text'
+                }`}
+              >
+                <Icon size={13} weight={isActive ? 'fill' : 'regular'} />
+                {label}
+              </button>
+            )
+          })}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={handleCopy}
+            disabled={stats.pageCount === 0}
+            className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-[12px] font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
+              copied
+                ? 'bg-success text-white'
+                : 'bg-panel-accent text-white hover:bg-panel-accent-hover'
+            }`}
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? 'Copied!' : 'Copy Markdown'}
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={stats.pageCount === 0}
+            aria-label={exportMode === 'zip' ? 'Download ZIP archive' : 'Download Markdown file'}
+            className="px-3 py-2 rounded-lg border border-panel-border text-panel-text-dim text-[12px] font-medium hover:bg-panel-surface hover:text-panel-text transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
+            title={exportMode === 'zip' ? 'Download .zip' : 'Download .md'}
+          >
+            <DownloadSimple size={14} />
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -10,11 +10,15 @@ export type PanelMode =
   | 'inspect'
   | 'scan'
   | 'design-system'
+  | 'contrast'
   | 'export'
   | 'history'
   | 'markdown'
   | 'crawl'
   | 'settings'
+
+/** How a finished crawl is exported: one concatenated .md, or a multi-file .zip. */
+export type CrawlExportMode = 'single' | 'zip'
 
 export interface ScanProgress {
   percent: number
@@ -38,6 +42,9 @@ interface PanelState {
   crawlProgress: CrawlProgress | null
   crawlResult: CrawlResult | null
   crawlError: string | null
+  // Chosen crawl export shape. Transient (never persisted): a fresh panel always
+  // defaults to the single-file .md; the ⌘K "Crawl → ZIP" command presets 'zip'.
+  crawlExportMode: CrawlExportMode
   // True once `persist` has finished its async rehydration from
   // chrome.storage.local. The panel UI gates on this so it never paints the
   // default state first and then snaps to the restored one (see App.tsx).
@@ -60,6 +67,7 @@ interface PanelState {
   setCrawlProgress: (progress: CrawlProgress | null) => void
   setCrawlResult: (result: CrawlResult | null) => void
   setCrawlError: (error: string | null) => void
+  setCrawlExportMode: (mode: CrawlExportMode) => void
   setHasHydrated: (hydrated: boolean) => void
 }
 
@@ -80,6 +88,7 @@ export const usePanelStore = create<PanelState>()(
       crawlProgress: null,
       crawlResult: null,
       crawlError: null,
+      crawlExportMode: 'single',
       hasHydrated: false,
 
       setMode: (mode) => set({ activeMode: mode }),
@@ -99,6 +108,7 @@ export const usePanelStore = create<PanelState>()(
       setCrawlProgress: (progress) => set({ crawlProgress: progress }),
       setCrawlResult: (result) => set({ crawlResult: result }),
       setCrawlError: (error) => set({ crawlError: error }),
+      setCrawlExportMode: (mode) => set({ crawlExportMode: mode }),
       setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
     }),
     {
