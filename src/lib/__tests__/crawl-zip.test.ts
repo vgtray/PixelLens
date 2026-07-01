@@ -16,6 +16,7 @@ function makeResult(): CrawlResult {
       { url: 'https://ex.com/c', title: '', markdown: 'body c', wordCount: 1 },
     ],
     skipped: ['https://ex.com/private'],
+    skippedReasons: { robots: 1 },
     document: 'IGNORED single-file document',
     generatedAt: '2026-07-01T00:00:00.000Z',
     stats: { pageCount: 3, skippedCount: 1, bytes: 100, discovery: 'crawl' },

@@ -30,6 +30,28 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// Libellé lisible d'une raison de skip pour le breakdown (`http-403` → `HTTP 403`).
+// C'est ce qui dit à l'utilisateur POURQUOI une page a été ignorée.
+function formatSkipReason(reason: string): string {
+  if (reason.startsWith('http-')) return `HTTP ${reason.slice(5)}`
+  switch (reason) {
+    case 'robots':
+      return 'robots.txt'
+    case 'timeout':
+      return 'timeout'
+    case 'non-text':
+      return 'non-text'
+    case 'cross-origin':
+      return 'off-site'
+    case 'network':
+      return 'network/CORS'
+    case 'empty':
+      return 'empty'
+    default:
+      return reason
+  }
+}
+
 function CrawlView() {
   const running = usePanelStore((s) => s.crawlRunning)
   const progress = usePanelStore((s) => s.crawlProgress)
@@ -41,6 +63,8 @@ function CrawlView() {
   const setError = usePanelStore((s) => s.setCrawlError)
   const exportMode = usePanelStore((s) => s.crawlExportMode)
   const setExportMode = usePanelStore((s) => s.setCrawlExportMode)
+  const respectRobots = usePanelStore((s) => s.crawlRespectRobots)
+  const setRespectRobots = usePanelStore((s) => s.setCrawlRespectRobots)
   const [copied, setCopied] = useState(false)
 
   const handleStart = useCallback(async () => {
@@ -51,7 +75,7 @@ function CrawlView() {
     try {
       // startUrl vide : le content script fait autorité et utilise location.href de
       // l'onglet courant (le panel n'a pas forcément accès à tab.url).
-      const res = await sendMessage(MessageType.CRAWL_SITE, { startUrl: '' })
+      const res = await sendMessage(MessageType.CRAWL_SITE, { startUrl: '', respectRobots })
       if (!res?.success) {
         setRunning(false)
         setError('unsupported')
@@ -61,7 +85,7 @@ function CrawlView() {
       setRunning(false)
       setError('failed')
     }
-  }, [setRunning, setError, setResult, setProgress])
+  }, [setRunning, setError, setResult, setProgress, respectRobots])
 
   const handleStop = useCallback(() => {
     // Annulation coopérative : le crawl finit la page en cours puis renvoie le document
@@ -175,6 +199,13 @@ function CrawlView() {
 
   // --- Done — document concaténé ----------------------------------------------------
   const { stats } = result
+  // Breakdown lisible des raisons de skip (trié par nombre décroissant). RÉVÈLE
+  // pourquoi le crawl skippe — la donnée manquante de la version précédente.
+  const reasonEntries = (Object.entries(result.skippedReasons) as [string, number | undefined][])
+    .map(([reason, n]) => [reason, n ?? 0] as const)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1])
+  const robotsSkipped = result.skippedReasons.robots ?? 0
   const preview =
     result.document.length > PREVIEW_LIMIT
       ? result.document.slice(0, PREVIEW_LIMIT) +
@@ -248,10 +279,24 @@ function CrawlView() {
           })}
         </div>
 
-        {stats.pageCount === 0 && (
+        {reasonEntries.length > 0 && (
           <p className="text-[10px] text-panel-text-dim mt-2 leading-relaxed">
-            No pages could be converted — the site may be client-rendered or blocked by
-            robots.txt.
+            <span className="text-panel-text">{stats.skippedCount.toLocaleString()}</span> skipped:{' '}
+            {reasonEntries.map(([reason, n]) => `${n} ${formatSkipReason(reason)}`).join(' · ')}
+          </p>
+        )}
+
+        {respectRobots && robotsSkipped > 0 && (
+          <p className="text-[10px] text-panel-accent/90 mt-1.5 leading-relaxed">
+            {robotsSkipped.toLocaleString()} blocked by robots.txt — turn off “Respect
+            robots.txt” below and crawl again to include them.
+          </p>
+        )}
+
+        {stats.pageCount === 0 && stats.skippedCount === 0 && (
+          <p className="text-[10px] text-panel-text-dim mt-2 leading-relaxed">
+            No pages could be converted — the site may be client-rendered (its initial HTML
+            is empty).
           </p>
         )}
       </div>
@@ -263,6 +308,29 @@ function CrawlView() {
 
       {/* Actions */}
       <div className="shrink-0 p-3 border-t border-panel-border flex flex-col gap-2">
+        {/* Respect robots.txt — ON by default (safe). Turn OFF to include pages that
+            robots.txt blocks: this is a human converting pages they can already see,
+            not an indexing crawler. Takes effect on the next crawl (Crawl again). */}
+        <div className="flex items-center justify-between gap-2 px-1">
+          <span className="text-[11px] text-panel-text-dim">Respect robots.txt</span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={respectRobots}
+            aria-label="Respect robots.txt"
+            onClick={() => setRespectRobots(!respectRobots)}
+            className={`relative h-4 w-7 shrink-0 rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg ${
+              respectRobots ? 'bg-panel-accent' : 'bg-panel-border'
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 left-0.5 h-3 w-3 rounded-full bg-white transition-transform duration-200 ${
+                respectRobots ? 'translate-x-3' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+
         {/* Export format — single concatenated .md vs a multi-file .zip. Additive:
             Copy always yields the single document; only the download shape changes. */}
         <div

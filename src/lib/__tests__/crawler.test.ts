@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   normalizeUrl,
   sameOrigin,
+  sameSite,
   parseRobots,
   robotsAllows,
   parseSitemap,
@@ -11,16 +12,18 @@ import {
   type CrawlDeps,
 } from '../crawler'
 import { htmlDocumentToMarkdown } from '../markdown'
-import type { CrawlPageResult } from '@/types/crawl'
+import type { CrawlPageResult, FetchTextResult } from '@/types/crawl'
 
 // --- Helpers ------------------------------------------------------------------------
 
-// Fake fetch piloté par une table URL -> texte (null = échec / absent).
+// Fake fetch piloté par une table URL -> texte (null = échec / absent). Adapte le
+// texte au résultat discriminé : présent -> { ok:true, text }, absent -> échec réseau.
 function makeFetch(pages: Record<string, string | null>) {
   const calls: string[] = []
-  const fetchText = async (url: string): Promise<string | null> => {
+  const fetchText = async (url: string): Promise<FetchTextResult> => {
     calls.push(url)
-    return url in pages ? pages[url] : null
+    const text = url in pages ? pages[url] : null
+    return text != null ? { ok: true, text } : { ok: false, reason: 'network' }
   }
   return { fetchText, calls }
 }
@@ -78,6 +81,26 @@ describe('sameOrigin', () => {
   })
   it('faux pour protocole différent', () => {
     expect(sameOrigin('http://ex.com/a', 'https://ex.com')).toBe(false)
+  })
+})
+
+// --- sameSite (filtre de crawl, plus large : apex <-> www) --------------------------
+
+describe('sameSite', () => {
+  it('vrai pour host exact', () => {
+    expect(sameSite('https://ex.com/a', 'https://ex.com')).toBe(true)
+  })
+  it('accepte la variante apex <-> www du même domaine', () => {
+    expect(sameSite('https://www.ex.com/a', 'https://ex.com')).toBe(true)
+    expect(sameSite('https://ex.com/a', 'https://www.ex.com')).toBe(true)
+  })
+  it('reste STRICT hors domaine (autre site, sous-domaine, CDN)', () => {
+    expect(sameSite('https://other.com/a', 'https://ex.com')).toBe(false)
+    expect(sameSite('https://blog.ex.com/a', 'https://ex.com')).toBe(false)
+    expect(sameSite('https://cdn.ex.com/a', 'https://www.ex.com')).toBe(false)
+  })
+  it('faux pour protocole différent', () => {
+    expect(sameSite('http://ex.com/a', 'https://ex.com')).toBe(false)
   })
 })
 
@@ -383,6 +406,116 @@ describe('crawlSite — fallback BFS same-origin', () => {
     expect(progresses.length).toBeGreaterThan(0)
     expect(res.document).toContain('## Table of contents')
     expect(res.stats.bytes).toBeGreaterThan(0)
+  })
+})
+
+// --- crawlSite : robots off / same-site / raisons de skip ---------------------------
+
+describe('crawlSite — respectRobots=false', () => {
+  it('inclut les chemins interdits et ne télécharge même pas robots.txt', async () => {
+    const { fetchText, calls } = makeFetch({
+      'https://ex.com/robots.txt': 'User-agent: *\nDisallow: /private\n',
+      'https://ex.com/sitemap.xml': null,
+      'https://ex.com/': page(['/public', '/private']),
+      'https://ex.com/public': page([]),
+      'https://ex.com/private': page([]),
+    })
+    const res = await crawlSite(
+      { startUrl: 'https://ex.com/', respectRobots: false },
+      baseDeps(fetchText),
+    )
+    expect(sortedPageUrls(res.pages)).toEqual([
+      'https://ex.com/',
+      'https://ex.com/private',
+      'https://ex.com/public',
+    ])
+    expect(calls).not.toContain('https://ex.com/robots.txt')
+    expect(res.skippedReasons.robots ?? 0).toBe(0)
+  })
+})
+
+describe('crawlSite — découverte same-site (apex <-> www)', () => {
+  it('accepte les URLs www du sitemap quand la page de départ est sur l’apex', async () => {
+    const { fetchText } = makeFetch({
+      'https://ex.com/robots.txt': null,
+      'https://ex.com/sitemap.xml':
+        '<urlset><url><loc>https://www.ex.com/a</loc></url>' +
+        '<url><loc>https://www.ex.com/b</loc></url></urlset>',
+      'https://ex.com/': page([]),
+      'https://www.ex.com/a': page([]),
+      'https://www.ex.com/b': page([]),
+    })
+    const res = await crawlSite({ startUrl: 'https://ex.com/' }, baseDeps(fetchText))
+    expect(res.stats.discovery).toBe('sitemap')
+    expect(sortedPageUrls(res.pages)).toEqual([
+      'https://ex.com/',
+      'https://www.ex.com/a',
+      'https://www.ex.com/b',
+    ])
+  })
+
+  it('rejette toujours un autre domaine / sous-domaine (hors apex/www)', async () => {
+    const { fetchText } = makeFetch({
+      'https://ex.com/robots.txt': null,
+      'https://ex.com/sitemap.xml': null,
+      'https://ex.com/': page(['https://cdn.ex.com/x', 'https://other.com/y', '/ok']),
+      'https://ex.com/ok': page([]),
+    })
+    const res = await crawlSite({ startUrl: 'https://ex.com/' }, baseDeps(fetchText))
+    expect(sortedPageUrls(res.pages)).toEqual(['https://ex.com/', 'https://ex.com/ok'])
+  })
+})
+
+describe('crawlSite — breakdown des raisons de skip', () => {
+  it('agrège chaque skip par raison (robots / http-403 / non-text / empty)', async () => {
+    const table: Record<string, FetchTextResult> = {
+      'https://ex.com/robots.txt': { ok: true, text: 'User-agent: *\nDisallow: /blocked\n' },
+      'https://ex.com/sitemap.xml': { ok: false, reason: 'network' },
+      'https://ex.com/': {
+        ok: true,
+        text: page(['/blocked', '/forbidden', '/asset', '/empty', '/ok']),
+      },
+      'https://ex.com/forbidden': { ok: false, reason: 'http-403' },
+      'https://ex.com/asset': { ok: false, reason: 'non-text' },
+      'https://ex.com/empty': { ok: true, text: page([]) },
+      'https://ex.com/ok': { ok: true, text: page([]) },
+    }
+    const fetchText = async (url: string): Promise<FetchTextResult> =>
+      url in table ? table[url] : { ok: false, reason: 'network' }
+    // Convert renvoie du Markdown vide pour /empty -> compté « empty ».
+    const convert = (_html: string, url: string): CrawlPageResult | null =>
+      url === 'https://ex.com/empty'
+        ? { url, title: 'Empty', markdown: '   ', wordCount: 0 }
+        : { url, title: `T ${url}`, markdown: `Body ${url}`, wordCount: 2 }
+
+    const res = await crawlSite(
+      { startUrl: 'https://ex.com/' },
+      { fetchText, convert, delay: () => Promise.resolve() },
+    )
+    expect(sortedPageUrls(res.pages)).toEqual(['https://ex.com/', 'https://ex.com/ok'])
+    expect(res.skippedReasons).toEqual({
+      robots: 1,
+      'http-403': 1,
+      'non-text': 1,
+      empty: 1,
+    })
+    expect(res.stats.skippedCount).toBe(4)
+  })
+
+  it('porte la dernière raison de skip dans la progression', async () => {
+    const reasons: (string | undefined)[] = []
+    const { fetchText } = makeFetch({
+      'https://ex.com/robots.txt': 'User-agent: *\nDisallow: /blocked\n',
+      'https://ex.com/sitemap.xml': null,
+      'https://ex.com/': page(['/blocked', '/ok']),
+      'https://ex.com/ok': page([]),
+    })
+    await crawlSite(
+      { startUrl: 'https://ex.com/' },
+      baseDeps(fetchText, { onProgress: (p) => reasons.push(p.lastSkipReason) }),
+    )
+    // Après le skip robots de /blocked, un emit ultérieur porte la raison.
+    expect(reasons).toContain('robots')
   })
 })
 

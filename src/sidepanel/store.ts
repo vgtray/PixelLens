@@ -45,6 +45,10 @@ interface PanelState {
   // Chosen crawl export shape. Transient (never persisted): a fresh panel always
   // defaults to the single-file .md; the ⌘K "Crawl → ZIP" command presets 'zip'.
   crawlExportMode: CrawlExportMode
+  // Whether the next crawl respects robots.txt. Transient (never persisted): a
+  // fresh panel always defaults to ON (safe default). The user can turn it OFF
+  // from the crawl view when robots.txt is what's blocking every page.
+  crawlRespectRobots: boolean
   // True once `persist` has finished its async rehydration from
   // chrome.storage.local. The panel UI gates on this so it never paints the
   // default state first and then snaps to the restored one (see App.tsx).
@@ -68,6 +72,7 @@ interface PanelState {
   setCrawlResult: (result: CrawlResult | null) => void
   setCrawlError: (error: string | null) => void
   setCrawlExportMode: (mode: CrawlExportMode) => void
+  setCrawlRespectRobots: (respect: boolean) => void
   setHasHydrated: (hydrated: boolean) => void
 }
 
@@ -89,6 +94,7 @@ export const usePanelStore = create<PanelState>()(
       crawlResult: null,
       crawlError: null,
       crawlExportMode: 'single',
+      crawlRespectRobots: true,
       hasHydrated: false,
 
       setMode: (mode) => set({ activeMode: mode }),
@@ -109,6 +115,7 @@ export const usePanelStore = create<PanelState>()(
       setCrawlResult: (result) => set({ crawlResult: result }),
       setCrawlError: (error) => set({ crawlError: error }),
       setCrawlExportMode: (mode) => set({ crawlExportMode: mode }),
+      setCrawlRespectRobots: (respect) => set({ crawlRespectRobots: respect }),
       setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
     }),
     {

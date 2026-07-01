@@ -24,6 +24,9 @@ import type {
   CrawlPageResult,
   CrawlProgress,
   CrawlResult,
+  FetchTextResult,
+  SkipReason,
+  SkipReasonCounts,
 } from '@/types/crawl'
 
 /** Bornes par défaut (figées par le produit). */
@@ -34,8 +37,12 @@ const MAX_SUBSITEMAPS = 50
 
 /** I/O et conversion injectés — permettent de tester l'orchestration sans réseau. */
 export interface CrawlDeps {
-  /** Récupère le texte d'une URL ; `null` si échec / non-OK / non-textuel. */
-  fetchText: (url: string) => Promise<string | null>
+  /**
+   * Récupère le texte d'une URL. Résultat DISCRIMINÉ : `{ ok:true, text }` ou
+   * `{ ok:false, reason }` — la raison (http-<status>/timeout/non-text/network)
+   * remonte jusqu'au breakdown affiché à l'utilisateur.
+   */
+  fetchText: (url: string) => Promise<FetchTextResult>
   /** Convertit le HTML d'une page en Markdown ; `null` si rien d'exploitable. */
   convert: (html: string, url: string) => CrawlPageResult | null
   onProgress?: (progress: CrawlProgress) => void
@@ -72,6 +79,29 @@ export function normalizeUrl(raw: string): string {
 export function sameOrigin(url: string, origin: string): boolean {
   try {
     return new URL(url).origin === origin
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Même SITE (filtre de crawl, plus large que sameOrigin) : même protocole ET même
+ * host, OU la variante apex↔www du même domaine (`example.com` ↔ `www.example.com`).
+ * On strippe UNIQUEMENT le `www.` de tête : reste STRICT sur tout autre sous-domaine
+ * (`blog.` / `cdn.` / autre domaine → refusés), donc pas de saut vers un autre site.
+ *
+ * Motivation : les sitemaps (et les liens canoniques) listent souvent l'hôte `www`
+ * alors que la page de départ est sur l'apex (ou l'inverse). Avec sameOrigin STRICT,
+ * ces URLs étaient toutes rejetées → 0 page découverte. NOTE : un fetch vers l'autre
+ * variante d'hôte peut rester bloqué par CORS depuis le content script ; ce n'est plus
+ * silencieux — il ressort désormais avec la raison `network` dans le breakdown.
+ */
+export function sameSite(url: string, origin: string): boolean {
+  try {
+    const u = new URL(url)
+    const o = new URL(origin)
+    if (u.protocol !== o.protocol) return false
+    return u.hostname.replace(/^www\./, '') === o.hostname.replace(/^www\./, '')
   } catch {
     return false
   }
@@ -296,6 +326,7 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
   const maxPages = options.maxPages ?? CRAWL_DEFAULTS.maxPages
   const maxDepth = options.maxDepth ?? CRAWL_DEFAULTS.maxDepth
   const delayMs = options.delayMs ?? CRAWL_DEFAULTS.delayMs
+  const respectRobots = options.respectRobots ?? true
   const onProgress = deps.onProgress ?? (() => {})
   const shouldStop = deps.shouldStop ?? (() => false)
   const delay = deps.delay ?? realDelay
@@ -304,43 +335,59 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
   const origin = safeOrigin(options.startUrl)
   const host = safeHost(options.startUrl)
 
+  // deps.fetchText ne rejette pas en pratique, mais on blinde : un rejet inattendu
+  // devient une raison `network` explicite plutôt qu'un crash silencieux du crawl.
+  const fetchTextSafe = (url: string): Promise<FetchTextResult> =>
+    deps.fetchText(url).catch((): FetchTextResult => ({ ok: false, reason: 'network' }))
+
   // robots.txt (best-effort : un échec n'interrompt pas le crawl, il autorise tout).
-  const robotsTxt = await deps.fetchText(origin + '/robots.txt').catch(() => null)
-  const disallow = robotsTxt ? parseRobots(robotsTxt) : []
+  // Désactivable via respectRobots : à false on NE fetch même pas robots.txt.
+  let disallow: string[] = []
+  if (respectRobots) {
+    const robotsRes = await fetchTextSafe(origin + '/robots.txt')
+    if (robotsRes.ok) disallow = parseRobots(robotsRes.text)
+  }
 
   const pages: CrawlPageResult[] = []
   const skipped: string[] = []
+  const skippedReasons: SkipReasonCounts = {}
   const visited = new Set<string>()
   const counters = { skipped: 0 }
+  // Dernière raison de skip, portée au prochain emit() pour un feedback live.
+  let lastSkipReason: SkipReason | undefined
 
   const emit = (currentUrl: string, total: number): void =>
-    onProgress({ done: pages.length, total, currentUrl, skipped: counters.skipped })
+    onProgress({ done: pages.length, total, currentUrl, skipped: counters.skipped, lastSkipReason })
 
-  const skip = (url: string): void => {
+  const skip = (url: string, reason: SkipReason): void => {
     counters.skipped++
     skipped.push(url)
+    skippedReasons[reason] = (skippedReasons[reason] ?? 0) + 1
+    lastSkipReason = reason
   }
 
-  // Traite une URL : garde same-origin + robots, fetch, convert. Renvoie le HTML
-  // (pour l'expansion de liens en BFS) ou null si la page a été ignorée.
+  // Traite une URL : garde same-site + robots, fetch, convert. Renvoie le HTML
+  // (pour l'expansion de liens en BFS) ou null si la page a été ignorée — avec, dans
+  // ce cas, une RAISON explicite enregistrée dans skippedReasons.
   const processOne = async (url: string, total: number): Promise<string | null> => {
-    if (!sameOrigin(url, origin)) {
-      skip(url)
+    if (!sameSite(url, origin)) {
+      skip(url, 'cross-origin')
       return null
     }
-    if (!robotsAllows(pathWithQuery(url), disallow)) {
-      skip(url)
+    if (respectRobots && !robotsAllows(pathWithQuery(url), disallow)) {
+      skip(url, 'robots')
       return null
     }
     emit(url, total)
-    const html = await deps.fetchText(url).catch(() => null)
-    if (!html) {
-      skip(url)
+    const res = await fetchTextSafe(url)
+    if (!res.ok) {
+      skip(url, res.reason)
       return null
     }
+    const html = res.text
     const page = deps.convert(html, url)
     if (!page || !page.markdown.trim()) {
-      skip(url)
+      skip(url, 'empty')
       return null
     }
     pages.push(page)
@@ -352,9 +399,9 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
   // --- Découverte : sitemap.xml d'abord ---
   let discovery: CrawlDiscovery = 'crawl'
   let sitemapSeeds: string[] = []
-  const sitemapXml = await deps.fetchText(origin + '/sitemap.xml').catch(() => null)
-  if (sitemapXml) {
-    sitemapSeeds = await collectSitemapUrls(sitemapXml, origin, deps, maxPages, delay, delayMs)
+  const sitemapRes = await fetchTextSafe(origin + '/sitemap.xml')
+  if (sitemapRes.ok) {
+    sitemapSeeds = await collectSitemapUrls(sitemapRes.text, origin, deps, maxPages, delay, delayMs)
     if (sitemapSeeds.length > 0) discovery = 'sitemap'
   }
 
@@ -386,7 +433,7 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
       if (html && depth < maxDepth) {
         for (const link of extractLinks(html, url)) {
           const n = normalizeUrl(link)
-          if (sameOrigin(n, origin) && !visited.has(n)) {
+          if (sameSite(n, origin) && !visited.has(n)) {
             queue.push({ url: n, depth: depth + 1 })
           }
         }
@@ -410,6 +457,7 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
     startUrl: options.startUrl,
     pages,
     skipped,
+    skippedReasons,
     document,
     generatedAt,
     stats: {
@@ -422,7 +470,7 @@ export async function crawlSite(options: CrawlOptions, deps: CrawlDeps): Promise
 }
 
 // Agrège les URLs d'un sitemap ; suit les sous-sitemaps d'un index (borné), filtre
-// same-origin, normalise et déduplique, plafonné à maxPages.
+// same-site (apex↔www inclus), normalise et déduplique, plafonné à maxPages.
 async function collectSitemapUrls(
   xml: string,
   origin: string,
@@ -434,24 +482,24 @@ async function collectSitemapUrls(
   const parsed = parseSitemap(xml)
   const out: string[] = []
 
-  const pushSameOrigin = (urls: string[]): void => {
+  const pushSameSite = (urls: string[]): void => {
     for (const u of urls) {
-      if (sameOrigin(u, origin)) out.push(normalizeUrl(u))
+      if (sameSite(u, origin)) out.push(normalizeUrl(u))
       if (out.length >= maxPages) break
     }
   }
 
   if (!parsed.isIndex) {
-    pushSameOrigin(parsed.urls)
+    pushSameSite(parsed.urls)
     return dedupePreserveOrder(out).slice(0, maxPages)
   }
 
   // Sitemap index : on récupère les sous-sitemaps (bornés) et on fusionne leurs URLs.
-  const subSitemaps = parsed.urls.filter((u) => sameOrigin(u, origin)).slice(0, MAX_SUBSITEMAPS)
+  const subSitemaps = parsed.urls.filter((u) => sameSite(u, origin)).slice(0, MAX_SUBSITEMAPS)
   for (const sub of subSitemaps) {
     if (out.length >= maxPages) break
-    const subXml = await deps.fetchText(sub).catch(() => null)
-    if (subXml) pushSameOrigin(parseSitemap(subXml).urls)
+    const subRes = await deps.fetchText(sub).catch((): FetchTextResult => ({ ok: false, reason: 'network' }))
+    if (subRes.ok) pushSameSite(parseSitemap(subRes.text).urls)
     await delay(delayMs)
   }
   return dedupePreserveOrder(out).slice(0, maxPages)
