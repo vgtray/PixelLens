@@ -1,6 +1,6 @@
 // PixelLens — Color Extractor (extract and cluster colors from the page)
 
-import { toHex, toRgb, toHsl, isTransparent, clusterColors, classifyColors } from '@/lib/colors'
+import { toRgb, toHsl, isTransparent, clusterColors, classifyColors, tryToHex } from '@/lib/colors'
 import type { ColorToken } from '@/types/design-system'
 
 const COLOR_PROPS = ['color', 'background-color', 'border-color', 'outline-color'] as const
@@ -21,12 +21,11 @@ export class ColorExtractor {
         if (!value || SKIP_VALUES.has(value.toLowerCase())) continue
         if (isTransparent(value)) continue
 
-        let hex: string
-        try {
-          hex = toHex(value)
-        } catch {
-          continue
-        }
+        // Real rejection: modern/unparseable CSS colors (wide-gamut, color-mix,
+        // system colors…) either resolve to a valid hex or are dropped here —
+        // never smuggled through as a fake hex token.
+        const hex = tryToHex(value)
+        if (!hex) continue
 
         freqMap.set(hex, (freqMap.get(hex) || 0) + 1)
       }

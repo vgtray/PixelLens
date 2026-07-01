@@ -11,6 +11,7 @@ export enum MessageType {
   SCAN_PAGE = 'SCAN_PAGE',
   SCAN_PROGRESS = 'SCAN_PROGRESS',
   SCAN_COMPLETE = 'SCAN_COMPLETE',
+  SCAN_ERROR = 'SCAN_ERROR',
   EXTRACT_MARKDOWN = 'EXTRACT_MARKDOWN',
   CRAWL_SITE = 'CRAWL_SITE',
   CRAWL_PROGRESS = 'CRAWL_PROGRESS',
@@ -30,6 +31,7 @@ export interface MessagePayloadMap {
   [MessageType.SCAN_PAGE]: undefined
   [MessageType.SCAN_PROGRESS]: { progress: number; phase: string }
   [MessageType.SCAN_COMPLETE]: { designSystem: DesignSystem }
+  [MessageType.SCAN_ERROR]: undefined
   [MessageType.EXTRACT_MARKDOWN]: undefined
   [MessageType.CRAWL_SITE]: CrawlOptions
   [MessageType.CRAWL_PROGRESS]: CrawlProgress

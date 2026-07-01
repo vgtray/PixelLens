@@ -2,6 +2,7 @@
 
 import { MessageType } from '@/types/messages'
 import type { MessagePayloadMap } from '@/types/messages'
+import { saveDesignSystem } from '@/lib/storage'
 
 // Prevent side panel from opening on action click (we control it manually)
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })
@@ -83,13 +84,25 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
       return true // async response
     }
 
-    case MessageType.SCAN_PROGRESS:
     case MessageType.SCAN_COMPLETE: {
-      // Forward scan results to the side panel
-      chrome.runtime.sendMessage({ type, payload }).catch((err) => console.debug('[PixelLens]', err.message))
-      sendResponse({ success: true })
-      break
+      // SINGLE source of truth for persistence. A content-script broadcast reaches
+      // BOTH the service worker AND the open side panel, so the worker must NOT
+      // re-broadcast (the panel already listens directly) — doing so handled every
+      // scan twice: duplicated in history and written twice to storage. Instead the
+      // worker — always alive, even when the panel is closed — persists the scan
+      // exactly once here; the panel merely updates its in-memory store on receipt.
+      const { designSystem } = payload as MessagePayloadMap[MessageType.SCAN_COMPLETE]
+      saveDesignSystem(designSystem)
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => {
+          console.debug('[PixelLens]', (err as Error).message)
+          sendResponse({ success: false })
+        })
+      return true // keep the worker alive until the write settles
     }
+
+    // SCAN_PROGRESS is intentionally NOT handled here: the content script broadcasts
+    // it and the side panel listens directly (relaying it would double-deliver).
 
     case MessageType.EXTRACT_MARKDOWN: {
       // Route extraction to the active tab's content script and relay the result back.
@@ -132,13 +145,9 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
       return true // async response
     }
 
-    case MessageType.CRAWL_PROGRESS:
-    case MessageType.CRAWL_COMPLETE: {
-      // Forward crawl progress / final document to the side panel.
-      chrome.runtime.sendMessage({ type, payload }).catch((err) => console.debug('[PixelLens]', err.message))
-      sendResponse({ success: true })
-      break
-    }
+    // CRAWL_PROGRESS / CRAWL_COMPLETE are intentionally NOT handled here: the content
+    // script broadcasts them and the side panel listens directly. Relaying them
+    // through the worker would double-deliver the (potentially multi-MB) document.
 
     case MessageType.TOGGLE_GRID:
     case MessageType.TOGGLE_MEASURE: {

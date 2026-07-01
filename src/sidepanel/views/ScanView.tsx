@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { Play, Palette, TextT, ArrowsOutSimple, Drop } from '@phosphor-icons/react'
+import { Play, Palette, TextT, ArrowsOutSimple, Drop, WarningCircle } from '@phosphor-icons/react'
 import gsap from 'gsap'
 import { usePanelStore } from '../store'
 import { sendMessage } from '@/lib/messaging'
@@ -20,10 +20,11 @@ const TABS: { id: ScanTab; label: string; icon: typeof Palette }[] = [
 
 function ScanView() {
   const scanProgress = usePanelStore((s) => s.scanProgress)
+  const scanError = usePanelStore((s) => s.scanError)
   const designSystem = usePanelStore((s) => s.designSystem)
   const setMode = usePanelStore((s) => s.setMode)
+  const setScanError = usePanelStore((s) => s.setScanError)
   const [activeTab, setActiveTab] = useState<ScanTab>('colors')
-  const [scanError, setScanError] = useState<string | null>(null)
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const [indicatorStyle, setIndicatorStyle] = useState({ left: 0, width: 0 })
   const progressBarRef = useRef<HTMLDivElement>(null)
@@ -109,6 +110,29 @@ function ScanView() {
     )
   }
 
+  // Scan failed — surface an error with a retry (symmetric to Crawl/Markdown) so
+  // the panel never hangs on the spinner. Checked before the empty/results states
+  // so a failure after a prior scan shows the error instead of stale results.
+  if (scanError) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
+        <div className="w-16 h-16 rounded-2xl bg-panel-surface border border-panel-border flex items-center justify-center">
+          <WarningCircle size={28} className="text-panel-text-dim" />
+        </div>
+        <div>
+          <p className="text-[13px] font-medium text-panel-text mb-1">Scan failed</p>
+          <p className="text-[11px] text-panel-text-dim leading-relaxed mb-4">{scanError}</p>
+          <button
+            onClick={handleStartScan}
+            className="px-4 py-2 rounded-lg bg-panel-accent text-white text-[12px] font-medium hover:bg-panel-accent-hover transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   // No scan results yet
   if (!designSystem) {
     return (
@@ -127,9 +151,6 @@ function ScanView() {
           >
             Start Scan
           </button>
-          {scanError && (
-            <p className="text-[11px] text-red-400 mt-3">{scanError}</p>
-          )}
         </div>
       </div>
     )

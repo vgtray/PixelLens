@@ -26,6 +26,7 @@ interface PanelState {
   inspectedElement: InspectedElement | null
   designSystem: DesignSystem | null
   scanProgress: ScanProgress | null
+  scanError: string | null
   colorFormat: 'hex' | 'rgb' | 'hsl'
   history: DesignSystem[]
   markdownResult: MarkdownResult | null
@@ -47,6 +48,7 @@ interface PanelState {
   setInspectedElement: (el: InspectedElement | null) => void
   setDesignSystem: (ds: DesignSystem | null) => void
   setScanProgress: (progress: ScanProgress | null) => void
+  setScanError: (error: string | null) => void
   setColorFormat: (format: 'hex' | 'rgb' | 'hsl') => void
   setHistory: (history: DesignSystem[]) => void
   addToHistory: (ds: DesignSystem) => void
@@ -68,6 +70,7 @@ export const usePanelStore = create<PanelState>()(
       inspectedElement: null,
       designSystem: null,
       scanProgress: null,
+      scanError: null,
       colorFormat: 'hex',
       history: [],
       markdownResult: null,
@@ -83,6 +86,7 @@ export const usePanelStore = create<PanelState>()(
       setInspectedElement: (el) => set({ inspectedElement: el }),
       setDesignSystem: (ds) => set({ designSystem: ds }),
       setScanProgress: (progress) => set({ scanProgress: progress }),
+      setScanError: (error) => set({ scanError: error }),
       setColorFormat: (format) => set({ colorFormat: format }),
       setHistory: (history) => set({ history }),
       addToHistory: (ds) =>
@@ -119,6 +123,7 @@ export const usePanelStore = create<PanelState>()(
         ...current,
         ...(persisted as Partial<PanelState>),
         scanProgress: null,
+        scanError: null,
         markdownLoading: false,
         markdownError: null,
       }),

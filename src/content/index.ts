@@ -104,11 +104,20 @@ onMessage(MessageType.SCAN_PAGE, (_payload, _sender, _sendResponse) => {
     scanner = new PageScanner()
   }
 
-  scanner.scan((progress, phase) => {
-    sendMessage(MessageType.SCAN_PROGRESS, { progress, phase })
-  }).then((designSystem) => {
-    sendMessage(MessageType.SCAN_COMPLETE, { designSystem })
-  })
+  scanner
+    .scan((progress, phase) => {
+      sendMessage(MessageType.SCAN_PROGRESS, { progress, phase }).catch(() => {})
+    })
+    .then((designSystem) => {
+      sendMessage(MessageType.SCAN_COMPLETE, { designSystem }).catch(() => {})
+    })
+    .catch((err) => {
+      // Without this .catch a scanner rejection (broken page, extractor throwing)
+      // never emitted SCAN_COMPLETE, leaving the panel stuck on the spinner forever.
+      // Surface an explicit error state so it can drop the spinner and offer retry.
+      console.debug('[PixelLens]', (err as Error).message)
+      sendMessage(MessageType.SCAN_ERROR, undefined).catch(() => {})
+    })
 
   // Return true to keep the message channel open for async response
   return true
@@ -137,6 +146,11 @@ onMessage(MessageType.EXTRACT_MARKDOWN, (_payload, _sender, sendResponse) => {
 // s'arrête (le panel restera alors sur la progression jusqu'à un nouveau lancement).
 let crawlAborted = false
 let crawlInProgress = false
+// Aborts the in-flight fetch the instant Stop is pressed (STOP_CRAWL) or the
+// per-request timeout fires. Previously `crawlAborted` was only read *between*
+// pages, so Stop had no effect during a pending request and a hung server froze
+// the whole crawl. This controller propagates the abort down to the live fetch.
+let crawlStopController: AbortController | null = null
 
 onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
   // Ignore un second lancement tant qu'un crawl tourne (un seul à la fois par onglet).
@@ -146,26 +160,26 @@ onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
   }
   crawlInProgress = true
   crawlAborted = false
+  crawlStopController = new AbortController()
 
-  // Lazy-load : crawler + moteur Markdown (turndown) hors du bundle content initial.
-  Promise.all([import('@/lib/crawler'), import('@/lib/markdown')])
-    .then(async ([{ crawlSite }, { htmlDocumentToMarkdown }]) => {
+  // Lazy-load : crawler + moteur Markdown (turndown) + fetch borné, hors du bundle
+  // content initial.
+  Promise.all([
+    import('@/lib/crawler'),
+    import('@/lib/markdown'),
+    import('@/lib/crawl-fetch'),
+  ])
+    .then(async ([{ crawlSite }, { htmlDocumentToMarkdown }, { fetchTextWithTimeout }]) => {
       // Le content script fait autorité sur l'URL de départ : si le panel n'a pas pu
       // fournir tab.url, on prend location.href de la page courante.
       const startUrl = options.startUrl || location.href
       const result = await crawlSite({ ...options, startUrl }, {
-        fetchText: async (url) => {
-          try {
-            const res = await fetch(url, { credentials: 'same-origin', redirect: 'follow' })
-            if (!res.ok) return null
-            const ct = res.headers.get('content-type') ?? ''
-            // Évite le binaire : on ne lit que du texte/HTML/XML.
-            if (ct && !/(text|html|xml|json|plain)/i.test(ct)) return null
-            return await res.text()
-          } catch {
-            return null
-          }
-        },
+        // Chaque requête a un timeout dur ET écoute le signal d'annulation global :
+        // Stop (STOP_CRAWL) abort() le fetch en vol, un timeout coupe un serveur muet.
+        // Une page en échec (timeout/abort/erreur) renvoie null → comptée « skipped »,
+        // le crawl continue.
+        fetchText: (url) =>
+          fetchTextWithTimeout(url, { signal: crawlStopController?.signal }),
         convert: (html, url) => {
           try {
             const doc = new DOMParser().parseFromString(html, 'text/html')
@@ -192,6 +206,7 @@ onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
     .catch((err) => console.debug('[PixelLens]', (err as Error).message))
     .finally(() => {
       crawlInProgress = false
+      crawlStopController = null
     })
 
   // Ack immédiat de la prise en charge ; les résultats arrivent via CRAWL_PROGRESS/COMPLETE.
@@ -201,6 +216,9 @@ onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
 
 onMessage(MessageType.STOP_CRAWL, (_payload, _sender, sendResponse) => {
   crawlAborted = true
+  // Interrompt immédiatement le fetch en cours (sinon Stop n'agit qu'entre deux
+  // pages, et reste sans effet pendant une requête pendante).
+  crawlStopController?.abort()
   sendResponse({ success: true })
 })
 

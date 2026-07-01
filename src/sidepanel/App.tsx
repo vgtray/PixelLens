@@ -12,7 +12,7 @@ import {
 import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
 import { MessageType } from '@/types/messages'
-import { saveDesignSystem, getDesignSystems } from '@/lib/storage'
+import { getDesignSystems } from '@/lib/storage'
 import InspectorView from './views/InspectorView'
 import ScanView from './views/ScanView'
 import DesignSystemView from './views/DesignSystemView'
@@ -43,6 +43,7 @@ function App() {
   const setInspectedElement = usePanelStore((s) => s.setInspectedElement)
   const setDesignSystem = usePanelStore((s) => s.setDesignSystem)
   const setScanProgress = usePanelStore((s) => s.setScanProgress)
+  const setScanError = usePanelStore((s) => s.setScanError)
   const addToHistory = usePanelStore((s) => s.addToHistory)
   const setCrawlProgress = usePanelStore((s) => s.setCrawlProgress)
   const setCrawlResult = usePanelStore((s) => s.setCrawlResult)
@@ -62,6 +63,7 @@ function App() {
     if (!hasHydrated) return
     const store = usePanelStore.getState()
     store.setScanProgress(null)
+    store.setScanError(null)
     store.setMarkdownLoading(false)
     store.setMarkdownError(null)
 
@@ -143,9 +145,21 @@ function App() {
         setDesignSystem(payload.designSystem)
         addToHistory(payload.designSystem)
         setScanProgress(null)
+        setScanError(null)
         setMode('scan')
-        // Persist to storage
-        saveDesignSystem(payload.designSystem).catch(console.error)
+        // Persistence is centralised in the service worker (always alive = source of
+        // truth, works even when this panel is closed), so the scan is saved exactly
+        // once. The panel only mirrors it into its in-memory store here.
+        sendResponse({ received: true })
+        return
+      }
+
+      if (message.type === MessageType.SCAN_ERROR) {
+        // Scan crashed in the content script. Drop the spinner and surface an error
+        // so the panel never hangs, symmetric to Markdown/Crawl.
+        setScanProgress(null)
+        setScanError('Something went wrong scanning this page.')
+        setMode('scan')
         sendResponse({ received: true })
         return
       }
@@ -169,7 +183,7 @@ function App() {
 
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
-  }, [setInspectedElement, setDesignSystem, setScanProgress, setMode, addToHistory, setCrawlProgress, setCrawlResult, setCrawlRunning])
+  }, [setInspectedElement, setDesignSystem, setScanProgress, setScanError, setMode, addToHistory, setCrawlProgress, setCrawlResult, setCrawlRunning])
 
   // Until the async persist rehydration completes we don't know the real
   // activeMode/markdown state yet. Show a minimal on-brand loader rather than
