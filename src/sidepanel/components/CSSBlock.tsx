@@ -66,6 +66,7 @@ function CSSBlock({ code, language = 'css' }: CSSBlockProps) {
             ? 'bg-success/20 text-success'
             : 'bg-panel-bg/80 text-panel-text-dim hover:text-panel-text hover:bg-panel-bg'
         }`}
+        aria-label={copied ? 'Copied' : 'Copy'}
         title={copied ? 'Copied!' : 'Copy'}
       >
         {copied ? <Check size={12} /> : <Copy size={12} />}

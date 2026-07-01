@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Export, Check } from '@phosphor-icons/react'
 import gsap from 'gsap'
+import { prefersReducedMotion } from '../reducedMotion'
 import { formatExport } from '@/lib/design-tokens'
 import { copyToClipboard, generatePalettePNG } from '@/lib/export'
 import type { DesignSystem, ExportFormat } from '@/types/design-system'
@@ -38,6 +39,8 @@ function ExportButton({ designSystem, onExport }: ExportButtonProps) {
   }, [open])
 
   const spawnConfetti = useCallback(() => {
+    // Confetti is pure delight — skip it entirely under reduced motion.
+    if (prefersReducedMotion()) return
     const container = confettiContainerRef.current
     if (!container) return
 

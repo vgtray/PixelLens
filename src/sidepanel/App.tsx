@@ -21,6 +21,8 @@ import HistoryView from './views/HistoryView'
 import MarkdownView from './views/MarkdownView'
 import CrawlView from './views/CrawlView'
 import SettingsView from './views/SettingsView'
+import PixelLensLogo from './components/PixelLensLogo'
+import { prefersReducedMotion } from './reducedMotion'
 
 const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass }[] = [
   { mode: 'inspect', label: 'Inspect', icon: MagnifyingGlass },
@@ -107,6 +109,9 @@ function App() {
     if (isFirstRender.current) {
       gsap.set(indicator, { left: el.offsetLeft, width: el.offsetWidth, opacity: 1 })
       isFirstRender.current = false
+    } else if (prefersReducedMotion()) {
+      // Reduced motion: snap the indicator to the new tab instead of sliding.
+      gsap.set(indicator, { left: el.offsetLeft, width: el.offsetWidth, opacity: 1 })
     } else {
       gsap.set(indicator, { opacity: 1 })
       gsap.to(indicator, {
@@ -191,9 +196,7 @@ function App() {
   if (!hasHydrated) {
     return (
       <div className="flex items-center justify-center h-screen bg-panel-bg">
-        <div className="w-5 h-5 rounded bg-panel-accent flex items-center justify-center animate-pulse">
-          <span className="text-white text-[10px] font-semibold leading-none">P</span>
-        </div>
+        <PixelLensLogo size={24} className="animate-pulse" />
       </div>
     )
   }
@@ -224,9 +227,7 @@ function App() {
       {/* Header */}
       <header className="shrink-0 border-b border-panel-border px-3 pt-3 pb-0">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-5 h-5 rounded bg-panel-accent flex items-center justify-center">
-            <span className="text-white text-[10px] font-semibold leading-none">P</span>
-          </div>
+          <PixelLensLogo size={20} />
           <h1 className="text-[16px] font-semibold text-panel-text tracking-tight">
             PixelLens
           </h1>
@@ -247,7 +248,8 @@ function App() {
                 key={tab.mode}
                 ref={(el) => { tabsRef.current[i] = el }}
                 onClick={() => setMode(tab.mode)}
-                className={`flex items-center gap-1.5 px-3 pb-2 pt-1 text-[12px] font-medium transition-colors duration-200 ${
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center gap-1.5 px-3 pb-2 pt-1 text-[12px] font-medium rounded-md transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
                   isActive ? 'text-panel-text' : 'text-panel-text-dim hover:text-panel-text'
                 }`}
               >
@@ -274,7 +276,9 @@ function App() {
               <button
                 key={tab.mode}
                 onClick={() => setMode(tab.mode)}
-                className={`p-1.5 rounded-md transition-colors duration-200 ${
+                aria-label={tab.label}
+                aria-current={isActive ? 'page' : undefined}
+                className={`p-1.5 rounded-md transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg ${
                   isActive
                     ? 'bg-panel-surface text-panel-accent'
                     : 'text-panel-text-dim hover:text-panel-text hover:bg-panel-surface'

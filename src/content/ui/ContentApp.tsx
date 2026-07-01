@@ -6,6 +6,7 @@ import { FloatingToolbar } from './FloatingToolbar'
 import { InspectorTooltip } from './InspectorTooltip'
 import { sendMessage } from '@/lib/messaging'
 import { MessageType } from '@/types/messages'
+import { isPixelLensElement } from '@/lib/dom-utils'
 
 type ContentMode = 'off' | 'inspect' | 'measure' | 'grid'
 
@@ -96,15 +97,6 @@ function ContentApp() {
       {tooltip && <InspectorTooltip data={tooltip} />}
     </>
   )
-}
-
-function isPixelLensElement(el: Element): boolean {
-  let node: Node | null = el
-  while (node) {
-    if ((node as HTMLElement).id === 'pixellens-host') return true
-    node = node.parentNode
-  }
-  return false
 }
 
 export function mountContentApp(container: HTMLElement): void {

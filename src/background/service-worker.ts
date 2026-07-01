@@ -159,24 +159,6 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
       })
       return true // async response
     }
-
-    case MessageType.GET_PREFERENCES: {
-      chrome.storage.sync.get('pixellens_preferences', (result) => {
-        sendResponse(result['pixellens_preferences'] || {
-          colorFormat: 'hex',
-          gridSize: 8,
-          theme: 'dark',
-        })
-      })
-      return true // async response
-    }
-
-    case MessageType.SET_PREFERENCES: {
-      const prefs = payload as MessagePayloadMap[MessageType.SET_PREFERENCES]
-      chrome.storage.sync.set({ pixellens_preferences: prefs.preferences })
-      sendResponse({ success: true })
-      break
-    }
   }
 })
 

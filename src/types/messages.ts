@@ -19,9 +19,6 @@ export enum MessageType {
   STOP_CRAWL = 'STOP_CRAWL',
   TOGGLE_GRID = 'TOGGLE_GRID',
   TOGGLE_MEASURE = 'TOGGLE_MEASURE',
-  GET_PREFERENCES = 'GET_PREFERENCES',
-  SET_PREFERENCES = 'SET_PREFERENCES',
-  OPEN_SIDE_PANEL = 'OPEN_SIDE_PANEL',
   PING = 'PING',
 }
 
@@ -39,9 +36,6 @@ export interface MessagePayloadMap {
   [MessageType.STOP_CRAWL]: undefined
   [MessageType.TOGGLE_GRID]: { visible: boolean; size?: number }
   [MessageType.TOGGLE_MEASURE]: { active: boolean }
-  [MessageType.GET_PREFERENCES]: undefined
-  [MessageType.SET_PREFERENCES]: { preferences: Partial<Preferences> }
-  [MessageType.OPEN_SIDE_PANEL]: undefined
   [MessageType.PING]: undefined
 }
 
@@ -57,7 +51,6 @@ export interface Preferences {
 }
 
 export type MessageResponse<T extends MessageType = MessageType> =
-  T extends MessageType.GET_PREFERENCES ? Preferences :
   T extends MessageType.ELEMENT_SELECTED ? { received: boolean } :
   T extends MessageType.SCAN_COMPLETE ? { received: boolean } :
   T extends MessageType.EXTRACT_MARKDOWN ? MarkdownResult :

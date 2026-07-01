@@ -8,8 +8,6 @@ const TEXT_TAGS = new Set([
   'td', 'th', 'caption', 'blockquote',
 ])
 
-const KNOWN_RATIOS = [1.067, 1.125, 1.2, 1.25, 1.333, 1.414, 1.5, 1.618] as const
-
 export class TypographyExtractor {
   extract(elements: Element[]): TypographyToken[] {
     // Family → Map<"size|weight" → variant with count>
@@ -69,42 +67,5 @@ export class TypographyExtractor {
     tokens.sort((a, b) => b.variants.length - a.variants.length)
 
     return tokens
-  }
-
-  detectTypeScaleRatio(tokens: TypographyToken[]): number | null {
-    // Collect all unique font sizes across all families
-    const sizes = new Set<number>()
-    for (const token of tokens) {
-      for (const v of token.variants) {
-        const px = parseFloat(v.fontSize)
-        if (px > 0) sizes.add(px)
-      }
-    }
-
-    const sorted = Array.from(sizes).sort((a, b) => a - b)
-    if (sorted.length < 3) return null
-
-    // Compute ratios between consecutive sizes
-    const ratios: number[] = []
-    for (let i = 1; i < sorted.length; i++) {
-      ratios.push(sorted[i] / sorted[i - 1])
-    }
-
-    // Find the median ratio
-    ratios.sort((a, b) => a - b)
-    const median = ratios[Math.floor(ratios.length / 2)]
-
-    // Match to nearest known ratio
-    let closest: number = KNOWN_RATIOS[0]
-    let minDiff = Math.abs(median - closest)
-    for (const r of KNOWN_RATIOS) {
-      const diff = Math.abs(median - r)
-      if (diff < minDiff) {
-        minDiff = diff
-        closest = r
-      }
-    }
-
-    return minDiff < 0.1 ? closest : null
   }
 }

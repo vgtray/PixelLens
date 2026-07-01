@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { Play, Palette, TextT, ArrowsOutSimple, Drop, WarningCircle } from '@phosphor-icons/react'
 import gsap from 'gsap'
+import { prefersReducedMotion } from '../reducedMotion'
 import { usePanelStore } from '../store'
 import { sendMessage } from '@/lib/messaging'
 import { MessageType } from '@/types/messages'
@@ -41,6 +42,12 @@ function ScanView() {
   useEffect(() => {
     const bar = progressBarRef.current
     if (!bar || !scanProgress) return
+
+    if (prefersReducedMotion()) {
+      // No width tween, no infinite shimmer: set the fill width directly.
+      gsap.set(bar, { width: `${scanProgress.percent}%` })
+      return
+    }
 
     gsap.to(bar, {
       width: `${scanProgress.percent}%`,

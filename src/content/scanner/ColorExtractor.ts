@@ -1,6 +1,6 @@
 // PixelLens — Color Extractor (extract and cluster colors from the page)
 
-import { toRgb, toHsl, isTransparent, clusterColors, classifyColors, tryToHex } from '@/lib/colors'
+import { isTransparent, clusterColors, classifyColors, tryToHex } from '@/lib/colors'
 import type { ColorToken } from '@/types/design-system'
 
 const COLOR_PROPS = ['color', 'background-color', 'border-color', 'outline-color'] as const
@@ -44,8 +44,6 @@ export class ColorExtractor {
     const tokens: ColorToken[] = clustered.map((c) => ({
       name: '',
       hex: c.hex,
-      rgb: toRgb(c.hex),
-      hsl: toHsl(c.hex),
       frequency: c.frequency,
       category: 'accent' as const,
     }))

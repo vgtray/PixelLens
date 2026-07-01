@@ -12,8 +12,6 @@ const mockDS: DesignSystem = {
     {
       name: 'Brand Red',
       hex: '#ff0000',
-      rgb: { r: 255, g: 0, b: 0 },
-      hsl: { h: 0, s: 100, l: 50 },
       frequency: 10,
       category: 'primary',
     },

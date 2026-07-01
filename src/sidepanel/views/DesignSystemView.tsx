@@ -79,6 +79,7 @@ function DesignSystemView() {
                 </span>
                 <button
                   onClick={() => handleRemoveColor(i)}
+                  aria-label={`Remove ${color.name || color.hex}`}
                   className="opacity-0 group-hover:opacity-100 p-0.5 text-panel-text-dim hover:text-red-400 transition-all duration-150"
                   title="Remove"
                 >

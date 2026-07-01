@@ -14,9 +14,22 @@ import { MessageType } from '@/types/messages'
 import { sendMessage } from '@/lib/messaging'
 import { setPanelInitialMode } from '@/lib/storage'
 import type { MarkdownResult } from '@/types/markdown'
+import PixelLensLogo from '@/sidepanel/components/PixelLensLogo'
 
 type InspectStatus = 'idle' | 'active' | 'unsupported'
 type MarkdownStatus = 'idle' | 'working' | 'done' | 'unsupported' | 'failed'
+
+function isMac(): boolean {
+  return typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+}
+
+// Fallback labels matching the manifest suggested_key (mac override included),
+// shown until chrome.commands.getAll() reports the real (possibly remapped) bindings.
+function defaultShortcuts() {
+  return isMac()
+    ? { inspect: '⌘⇧L', popup: '⌘⇧P' }
+    : { inspect: 'Ctrl+Shift+L', popup: 'Ctrl+Shift+P' }
+}
 
 export function Popup() {
   const [status, setStatus] = useState<InspectStatus>('idle')
@@ -26,6 +39,7 @@ export function Popup() {
   // chrome.sidePanel.open({ tabId }) synchronously — no awaited query is
   // allowed before the open() or Chrome drops the user gesture.
   const [tabId, setTabId] = useState<number | null>(null)
+  const [shortcuts, setShortcuts] = useState(defaultShortcuts)
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
@@ -37,6 +51,19 @@ export function Popup() {
           setCurrentUrl(tab.url)
         }
       }
+    })
+  }, [])
+
+  // Show the shortcuts actually bound (the user may remap them in
+  // chrome://extensions/shortcuts); fall back to the manifest defaults.
+  useEffect(() => {
+    chrome.commands?.getAll?.((cmds) => {
+      const find = (name: string) => cmds.find((c) => c.name === name)?.shortcut || ''
+      const fallback = defaultShortcuts()
+      setShortcuts({
+        inspect: find('toggle-inspect') || fallback.inspect,
+        popup: find('_execute_action') || fallback.popup,
+      })
     })
   }, [])
 
@@ -149,11 +176,7 @@ export function Popup() {
       {/* Header */}
       <header className="popup-header">
         <div className="popup-logo">
-          <svg width="20" height="20" viewBox="0 0 128 128" fill="none">
-            <circle cx="56" cy="56" r="24" stroke="#6366F1" strokeWidth="6" />
-            <line x1="73" y1="73" x2="100" y2="100" stroke="#6366F1" strokeWidth="6" strokeLinecap="round" />
-            <circle cx="56" cy="56" r="8" fill="#818CF8" />
-          </svg>
+          <PixelLensLogo size={20} />
           <span className="popup-title">PixelLens</span>
         </div>
         {currentUrl && (
@@ -232,17 +255,17 @@ export function Popup() {
         </div>
         <div className="popup-shortcut-row">
           <span>Toggle inspect</span>
-          <kbd>Ctrl+Shift+L</kbd>
+          <kbd>{shortcuts.inspect}</kbd>
         </div>
         <div className="popup-shortcut-row">
           <span>Open popup</span>
-          <kbd>Ctrl+Shift+P</kbd>
+          <kbd>{shortcuts.popup}</kbd>
         </div>
       </div>
 
       {/* Footer */}
       <footer className="popup-footer">
-        <button className="popup-footer-btn" title="Settings" onClick={handleSettings}>
+        <button className="popup-footer-btn" aria-label="Settings" title="Settings" onClick={handleSettings}>
           <GearSix size={16} weight="bold" />
         </button>
         <span className="popup-version">v1.0.0</span>

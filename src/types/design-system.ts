@@ -11,8 +11,6 @@ export type ColorCategory =
 export interface ColorToken {
   name: string
   hex: string
-  rgb: { r: number; g: number; b: number }
-  hsl: { h: number; s: number; l: number }
   frequency: number
   category: ColorCategory
 }
@@ -45,7 +43,7 @@ export interface ShadowParsed {
 
 export interface ShadowToken {
   value: string
-  parsed: ShadowParsed
+  parsed?: ShadowParsed
 }
 
 export interface BorderRadiusToken {

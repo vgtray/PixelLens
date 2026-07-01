@@ -8,6 +8,7 @@ import {
   Scan,
 } from '@phosphor-icons/react'
 import gsap from 'gsap'
+import { prefersReducedMotion } from '@/sidepanel/reducedMotion'
 
 type ContentMode = 'off' | 'inspect' | 'measure' | 'grid'
 
@@ -43,6 +44,12 @@ export function FloatingToolbar({
 
     const el = toolbarRef.current
     if (!el) return
+
+    if (prefersReducedMotion()) {
+      // Appear in place, no slide-up.
+      gsap.set(el, { y: 0, opacity: 1 })
+      return
+    }
 
     gsap.fromTo(
       el,
@@ -159,6 +166,7 @@ export function FloatingToolbar({
       {buttons.map((btn) => (
         <button
           key={btn.label}
+          aria-label={btn.label}
           title={btn.label}
           onClick={(e) => {
             e.stopPropagation()

@@ -198,6 +198,7 @@ function MarkdownView() {
           </div>
           <button
             onClick={handleGenerate}
+            aria-label="Regenerate"
             title="Regenerate"
             className="shrink-0 p-1.5 rounded-md text-panel-text-dim hover:text-panel-text hover:bg-panel-surface transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg"
           >
@@ -247,6 +248,7 @@ function MarkdownView() {
         </button>
         <button
           onClick={handleDownload}
+          aria-label="Download Markdown file"
           className="px-3 py-2 rounded-lg border border-panel-border text-panel-text-dim text-[12px] font-medium hover:bg-panel-surface hover:text-panel-text transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
           title="Download .md"
         >
