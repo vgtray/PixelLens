@@ -2,6 +2,8 @@
 
 import { onMessage } from '@/lib/messaging'
 import { MessageType } from '@/types/messages'
+import type { CrawlDeps } from '@/lib/crawler'
+import type { RenderPageResult } from '@/types/crawl'
 import { ElementHighlighter } from './inspector/ElementHighlighter'
 import { ElementSelector } from './inspector/ElementSelector'
 import { DistanceMeasurer } from './inspector/DistanceMeasurer'
@@ -173,11 +175,13 @@ onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
       // Le content script fait autorité sur l'URL de départ : si le panel n'a pas pu
       // fournir tab.url, on prend location.href de la page courante.
       const startUrl = options.startUrl || location.href
-      const result = await crawlSite({ ...options, startUrl }, {
+
+      const deps: CrawlDeps = {
         // Chaque requête a un timeout dur ET écoute le signal d'annulation global :
         // Stop (STOP_CRAWL) abort() le fetch en vol, un timeout coupe un serveur muet.
         // Une page en échec (timeout/abort/erreur) renvoie null → comptée « skipped »,
-        // le crawl continue.
+        // le crawl continue. En mode Full, fetchText ne sert QUE à la découverte
+        // (robots.txt / sitemap.xml, statiques et rendu-indépendants).
         fetchText: (url) =>
           fetchTextWithTimeout(url, { signal: crawlStopController?.signal }),
         convert: (html, url) => {
@@ -200,7 +204,37 @@ onMessage(MessageType.CRAWL_SITE, (options, _sender, sendResponse) => {
           sendMessage(MessageType.CRAWL_PROGRESS, progress).catch(() => {})
         },
         shouldStop: () => crawlAborted,
-      })
+      }
+
+      // Mode Full : le CONTENU de chaque page vient d'une navigation réelle. Le content
+      // script ne peut pas créer d'onglets → on délègue au service worker (RENDER_PAGE),
+      // qui rend la page dans un onglet arrière-plan et renvoie le Markdown du DOM rendu.
+      if (options.renderMode === 'full') {
+        deps.renderPage = async (url): Promise<RenderPageResult> => {
+          try {
+            const res = await sendMessage(MessageType.RENDER_PAGE, { url })
+            if (!res || !res.ok) {
+              return { ok: false, reason: res ? res.reason : 'network' }
+            }
+            const body = res.markdown.markdown.trim()
+            if (!body) return { ok: false, reason: 'empty' }
+            return {
+              ok: true,
+              page: {
+                url,
+                title: res.markdown.frontmatter.title,
+                markdown: body,
+                wordCount: res.markdown.frontmatter.wordCount,
+              },
+              links: res.links,
+            }
+          } catch {
+            return { ok: false, reason: 'network' }
+          }
+        }
+      }
+
+      const result = await crawlSite({ ...options, startUrl }, deps)
       sendMessage(MessageType.CRAWL_COMPLETE, { result }).catch(() => {})
     })
     .catch((err) => console.debug('[PixelLens]', (err as Error).message))

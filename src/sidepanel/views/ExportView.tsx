@@ -98,6 +98,7 @@ function ExportView() {
         </button>
         <button
           onClick={handleDownload}
+          aria-label="Download"
           className="px-3 py-2 rounded-lg border border-panel-border text-panel-text-dim text-[12px] font-medium hover:bg-panel-surface hover:text-panel-text transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg"
           title="Download"
         >

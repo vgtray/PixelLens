@@ -2,7 +2,9 @@
 
 import { MessageType } from '@/types/messages'
 import type { MessagePayloadMap } from '@/types/messages'
+import type { MarkdownResult } from '@/types/markdown'
 import { saveDesignSystem } from '@/lib/storage'
+import { renderPageInTab, type TabRenderDeps } from '@/lib/tab-render'
 
 // Prevent side panel from opening on action click (we control it manually)
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false })
@@ -145,6 +147,16 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
       return true // async response
     }
 
+    case MessageType.RENDER_PAGE: {
+      // Full-render mode: the content script (no chrome.tabs) delegates ONE page here.
+      // We open it in a background tab, let the JS run, capture the RENDERED DOM via
+      // EXTRACT_MARKDOWN, collect its links, then close the tab. renderPageInTab never
+      // rejects (returns a discriminated reason) and always closes the tab (no orphan).
+      const { url } = payload as MessagePayloadMap[MessageType.RENDER_PAGE]
+      renderPageInTab(url, realTabRenderDeps).then((outcome) => sendResponse(outcome))
+      return true // async response
+    }
+
     // CRAWL_PROGRESS / CRAWL_COMPLETE are intentionally NOT handled here: the content
     // script broadcasts them and the side panel listens directly. Relaying them
     // through the worker would double-deliver the (potentially multi-MB) document.
@@ -158,24 +170,6 @@ chrome.runtime.onMessage.addListener((message: IncomingMessage, sender, sendResp
         sendResponse({ success: delivered })
       })
       return true // async response
-    }
-
-    case MessageType.GET_PREFERENCES: {
-      chrome.storage.sync.get('pixellens_preferences', (result) => {
-        sendResponse(result['pixellens_preferences'] || {
-          colorFormat: 'hex',
-          gridSize: 8,
-          theme: 'dark',
-        })
-      })
-      return true // async response
-    }
-
-    case MessageType.SET_PREFERENCES: {
-      const prefs = payload as MessagePayloadMap[MessageType.SET_PREFERENCES]
-      chrome.storage.sync.set({ pixellens_preferences: prefs.preferences })
-      sendResponse({ success: true })
-      break
     }
   }
 })
@@ -262,3 +256,85 @@ export async function ensureContentScriptAndForward(
   if (!tab?.id) return false
   return ensureContentScriptOnTab(tab.id, type, payload)
 }
+
+// --- Full-render tab orchestration (RENDER_PAGE) ------------------------------------
+//
+// Real chrome.* wiring for lib/tab-render. Kept here (not in the message handler) so the
+// orchestration in lib/tab-render stays pure/testable and this file just injects the APIs.
+
+// Resolves when `tabId` reaches status 'complete'. Also resolves if the tab is REMOVED
+// (e.g. the per-page timeout in renderPageInTab already closed it): this lets the
+// abandoned render step settle and, crucially, removes both listeners so nothing leaks.
+// Guards against the load event having already fired before we subscribed (checks the
+// current status once via tabs.get).
+export function waitForTabComplete(tabId: number): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (): void => {
+      if (settled) return
+      settled = true
+      chrome.tabs.onUpdated.removeListener(onUpdated)
+      chrome.tabs.onRemoved.removeListener(onRemoved)
+      resolve()
+    }
+    const onUpdated = (id: number, info: chrome.tabs.OnUpdatedInfo): void => {
+      if (id === tabId && info.status === 'complete') finish()
+    }
+    const onRemoved = (id: number): void => {
+      if (id === tabId) finish()
+    }
+    chrome.tabs.onUpdated.addListener(onUpdated)
+    chrome.tabs.onRemoved.addListener(onRemoved)
+    // If the tab was already 'complete' before we subscribed, the event won't fire again.
+    chrome.tabs
+      .get(tabId)
+      .then((tab) => {
+        if (tab.status === 'complete') finish()
+      })
+      .catch(() => finish())
+  })
+}
+
+// Real dependencies handed to renderPageInTab. active:false = never steals focus.
+export const realTabRenderDeps: TabRenderDeps = {
+  createTab: async (url: string): Promise<number> => {
+    const tab = await chrome.tabs.create({ url, active: false })
+    if (tab.id === undefined) throw new Error('tab created without an id')
+    return tab.id
+  },
+  waitForComplete: waitForTabComplete,
+  extractMarkdown: async (tabId: number): Promise<MarkdownResult | undefined> => {
+    // The <all_urls> content script auto-injects on load; re-inject defensively if MV3
+    // never ran it on this fresh tab, then ask it to convert the RENDERED DOM.
+    if (!(await pingContentScript(tabId))) {
+      if (!(await injectContentScript(tabId))) return undefined
+    }
+    try {
+      return (await chrome.tabs.sendMessage(tabId, {
+        type: MessageType.EXTRACT_MARKDOWN,
+        payload: undefined,
+      })) as MarkdownResult | undefined
+    } catch (err) {
+      console.debug('[PixelLens]', (err as Error).message)
+      return undefined
+    }
+  },
+  collectLinks: async (tabId: number): Promise<string[]> => {
+    // Absolute hrefs from the RENDERED DOM — feeds the BFS when the site has no sitemap.
+    try {
+      const [res] = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () =>
+          Array.from(document.querySelectorAll('a[href]'))
+            .map((a) => (a as HTMLAnchorElement).href)
+            .filter((h) => h.startsWith('http')),
+      })
+      return (res?.result as string[] | undefined) ?? []
+    } catch (err) {
+      console.debug('[PixelLens]', (err as Error).message)
+      return []
+    }
+  },
+  removeTab: (tabId: number): Promise<void> => chrome.tabs.remove(tabId).then(() => {}),
+}
+

@@ -200,9 +200,9 @@ describe('clusterColors', () => {
 describe('classifyColors', () => {
   it('classifies chromatic colors as primary/secondary/accent', () => {
     const colors: ColorToken[] = [
-      { name: '', hex: '#ff0000', rgb: { r: 255, g: 0, b: 0 }, hsl: { h: 0, s: 100, l: 50 }, frequency: 10, category: 'primary' },
-      { name: '', hex: '#00ff00', rgb: { r: 0, g: 255, b: 0 }, hsl: { h: 120, s: 100, l: 50 }, frequency: 5, category: 'primary' },
-      { name: '', hex: '#0000ff', rgb: { r: 0, g: 0, b: 255 }, hsl: { h: 240, s: 100, l: 50 }, frequency: 2, category: 'primary' },
+      { name: '', hex: '#ff0000', frequency: 10, category: 'primary' },
+      { name: '', hex: '#00ff00', frequency: 5, category: 'primary' },
+      { name: '', hex: '#0000ff', frequency: 2, category: 'primary' },
     ];
     const result = classifyColors(colors);
     expect(result[0].category).toBe('primary');
@@ -212,9 +212,9 @@ describe('classifyColors', () => {
 
   it('classifies neutrals by luminance', () => {
     const colors: ColorToken[] = [
-      { name: '', hex: '#ffffff', rgb: { r: 255, g: 255, b: 255 }, hsl: { h: 0, s: 0, l: 100 }, frequency: 10, category: 'primary' },
-      { name: '', hex: '#000000', rgb: { r: 0, g: 0, b: 0 }, hsl: { h: 0, s: 0, l: 0 }, frequency: 5, category: 'primary' },
-      { name: '', hex: '#808080', rgb: { r: 128, g: 128, b: 128 }, hsl: { h: 0, s: 0, l: 50 }, frequency: 3, category: 'primary' },
+      { name: '', hex: '#ffffff', frequency: 10, category: 'primary' },
+      { name: '', hex: '#000000', frequency: 5, category: 'primary' },
+      { name: '', hex: '#808080', frequency: 3, category: 'primary' },
     ];
     const result = classifyColors(colors);
     const white = result.find((c) => c.hex === '#ffffff')!;

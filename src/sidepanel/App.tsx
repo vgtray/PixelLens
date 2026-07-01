@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   MagnifyingGlass,
   Scan,
@@ -8,11 +8,13 @@ import {
   MarkdownLogo,
   GlobeHemisphereWest,
   GearSix,
+  CircleHalf,
 } from '@phosphor-icons/react'
 import gsap from 'gsap'
 import { usePanelStore, type PanelMode } from './store'
 import { MessageType } from '@/types/messages'
 import { getDesignSystems } from '@/lib/storage'
+import { getHost } from '@/lib/url'
 import InspectorView from './views/InspectorView'
 import ScanView from './views/ScanView'
 import DesignSystemView from './views/DesignSystemView'
@@ -20,7 +22,16 @@ import ExportView from './views/ExportView'
 import HistoryView from './views/HistoryView'
 import MarkdownView from './views/MarkdownView'
 import CrawlView from './views/CrawlView'
+import ContrastCheckerView from './views/ContrastCheckerView'
 import SettingsView from './views/SettingsView'
+import PixelLensLogo from './components/PixelLensLogo'
+import CommandPalette, {
+  createNavigationCommands,
+  createContrastCommands,
+  createCrawlZipCommands,
+  isMacPlatform,
+} from './components/CommandPalette'
+import { prefersReducedMotion } from './reducedMotion'
 
 const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass }[] = [
   { mode: 'inspect', label: 'Inspect', icon: MagnifyingGlass },
@@ -29,6 +40,7 @@ const MAIN_TABS: { mode: PanelMode; label: string; icon: typeof MagnifyingGlass 
 ]
 
 const FOOTER_TABS: { mode: PanelMode; icon: typeof Export; label: string }[] = [
+  { mode: 'contrast', icon: CircleHalf, label: 'Contrast checker' },
   { mode: 'export', icon: Export, label: 'Export' },
   { mode: 'markdown', icon: MarkdownLogo, label: 'Markdown' },
   { mode: 'crawl', icon: GlobeHemisphereWest, label: 'Crawl site' },
@@ -48,10 +60,39 @@ function App() {
   const setCrawlProgress = usePanelStore((s) => s.setCrawlProgress)
   const setCrawlResult = usePanelStore((s) => s.setCrawlResult)
   const setCrawlRunning = usePanelStore((s) => s.setCrawlRunning)
+  const setCrawlExportMode = usePanelStore((s) => s.setCrawlExportMode)
+  const setActiveTabUrl = usePanelStore((s) => s.setActiveTabUrl)
+  const activeTabUrl = usePanelStore((s) => s.activeTabUrl)
+  const history = usePanelStore((s) => s.history)
 
   const tabsRef = useRef<(HTMLButtonElement | null)[]>([])
   const indicatorRef = useRef<HTMLDivElement>(null)
   const isFirstRender = useRef(true)
+
+  // Command palette: transient, LOCAL state only — it is an accelerator, never
+  // part of the persisted panel envelope.
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const commands = useMemo(
+    () => [
+      ...createNavigationCommands(setMode),
+      ...createContrastCommands(setMode),
+      ...createCrawlZipCommands(setMode, setCrawlExportMode),
+    ],
+    [setMode, setCrawlExportMode],
+  )
+  const shortcutLabel = isMacPlatform() ? '⌘K' : 'Ctrl K'
+
+  // Global ⌘K / Ctrl+K toggles the palette from anywhere in the panel.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && (e.key === 'k' || e.key === 'K')) {
+        e.preventDefault()
+        setPaletteOpen((v) => !v)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   // On mount (every time the side panel is opened — MV3 tears it down on close),
   // restore the durable state that lives outside the persisted panel envelope
@@ -84,6 +125,60 @@ function App() {
     }
   }, [hasHydrated])
 
+  // Track the URL of the tab currently in front of the user so the views can
+  // tell whether a restored scan/markdown belongs to the page on screen (see
+  // StaleScanBanner). Reading tab.url relies on the activeTab grant from the
+  // action click that opened the panel; a tab the extension has no host access
+  // to reports url=undefined, in which case we store null (unknown) and the
+  // views won't flag a false mismatch. Runs on mount, then follows tab switches
+  // and in-tab navigations (incl. SPA route changes) while the panel stays open.
+  useEffect(() => {
+    let cancelled = false
+    const readActiveTab = async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+        if (!cancelled) setActiveTabUrl(tab?.url ?? null)
+      } catch {
+        if (!cancelled) setActiveTabUrl(null)
+      }
+    }
+    void readActiveTab()
+    const onActivated = () => void readActiveTab()
+    const onUpdated = (
+      _tabId: number,
+      changeInfo: chrome.tabs.OnUpdatedInfo,
+      tab: chrome.tabs.Tab,
+    ) => {
+      // React only to a URL change on the *active* tab — a full navigation or an
+      // SPA route push both surface here. Ignore background-tab churn.
+      if (tab.active && changeInfo.url) void readActiveTab()
+    }
+    chrome.tabs.onActivated.addListener(onActivated)
+    chrome.tabs.onUpdated.addListener(onUpdated)
+    return () => {
+      cancelled = true
+      chrome.tabs.onActivated.removeListener(onActivated)
+      chrome.tabs.onUpdated.removeListener(onUpdated)
+    }
+  }, [setActiveTabUrl])
+
+  // Reconcile the shown design system with the active tab. When we know the host
+  // on screen, prefer the most recent scan of THAT host — so switching to (or
+  // reopening on) a previously scanned site restores its scan instead of
+  // whatever was scanned last globally. If nothing matches we leave the current
+  // scan in place and the stale-scan banner flags the host mismatch. Skipped
+  // while the active URL is unknown, so it can never wrongly override the scan.
+  useEffect(() => {
+    if (!hasHydrated) return
+    const activeHost = getHost(activeTabUrl)
+    if (!activeHost) return
+    const current = usePanelStore.getState().designSystem
+    // Already showing a scan of the active host → nothing to do.
+    if (current && getHost(current.metadata.url) === activeHost) return
+    const match = history.find((d) => getHost(d.metadata.url) === activeHost)
+    if (match) usePanelStore.getState().setDesignSystem(match)
+  }, [hasHydrated, activeTabUrl, history])
+
   // GSAP sliding indicator. `hasHydrated` is a dependency so the indicator is
   // (re)positioned on the very paint where the restored activeMode lands, not a
   // stale default — and never left stuck on the wrong tab after rehydration.
@@ -107,6 +202,9 @@ function App() {
     if (isFirstRender.current) {
       gsap.set(indicator, { left: el.offsetLeft, width: el.offsetWidth, opacity: 1 })
       isFirstRender.current = false
+    } else if (prefersReducedMotion()) {
+      // Reduced motion: snap the indicator to the new tab instead of sliding.
+      gsap.set(indicator, { left: el.offsetLeft, width: el.offsetWidth, opacity: 1 })
     } else {
       gsap.set(indicator, { opacity: 1 })
       gsap.to(indicator, {
@@ -191,9 +289,7 @@ function App() {
   if (!hasHydrated) {
     return (
       <div className="flex items-center justify-center h-screen bg-panel-bg">
-        <div className="w-5 h-5 rounded bg-panel-accent flex items-center justify-center animate-pulse">
-          <span className="text-white text-[10px] font-semibold leading-none">P</span>
-        </div>
+        <PixelLensLogo size={24} className="animate-pulse" />
       </div>
     )
   }
@@ -206,6 +302,8 @@ function App() {
         return <ScanView />
       case 'design-system':
         return <DesignSystemView />
+      case 'contrast':
+        return <ContrastCheckerView />
       case 'export':
         return <ExportView />
       case 'history':
@@ -224,12 +322,19 @@ function App() {
       {/* Header */}
       <header className="shrink-0 border-b border-panel-border px-3 pt-3 pb-0">
         <div className="flex items-center gap-2 mb-3">
-          <div className="w-5 h-5 rounded bg-panel-accent flex items-center justify-center">
-            <span className="text-white text-[10px] font-semibold leading-none">P</span>
-          </div>
+          <PixelLensLogo size={20} />
           <h1 className="text-[16px] font-semibold text-panel-text tracking-tight">
             PixelLens
           </h1>
+          <button
+            type="button"
+            onClick={() => setPaletteOpen(true)}
+            aria-label="Open command palette"
+            title="Command palette"
+            className="ml-auto flex items-center gap-1 rounded-md border border-panel-border px-1.5 py-1 font-mono text-[10px] leading-none text-panel-text-dim transition-colors hover:border-panel-text-dim hover:text-panel-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg"
+          >
+            {shortcutLabel}
+          </button>
         </div>
 
         {/* Mode tabs with GSAP sliding indicator */}
@@ -247,7 +352,8 @@ function App() {
                 key={tab.mode}
                 ref={(el) => { tabsRef.current[i] = el }}
                 onClick={() => setMode(tab.mode)}
-                className={`flex items-center gap-1.5 px-3 pb-2 pt-1 text-[12px] font-medium transition-colors duration-200 ${
+                aria-current={isActive ? 'page' : undefined}
+                className={`flex items-center gap-1.5 px-3 pb-2 pt-1 text-[12px] font-medium rounded-md transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel-bg ${
                   isActive ? 'text-panel-text' : 'text-panel-text-dim hover:text-panel-text'
                 }`}
               >
@@ -274,7 +380,9 @@ function App() {
               <button
                 key={tab.mode}
                 onClick={() => setMode(tab.mode)}
-                className={`p-1.5 rounded-md transition-colors duration-200 ${
+                aria-label={tab.label}
+                aria-current={isActive ? 'page' : undefined}
+                className={`p-1.5 rounded-md transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-panel-accent focus-visible:ring-offset-1 focus-visible:ring-offset-panel-bg ${
                   isActive
                     ? 'bg-panel-surface text-panel-accent'
                     : 'text-panel-text-dim hover:text-panel-text hover:bg-panel-surface'
@@ -288,6 +396,12 @@ function App() {
         </div>
         <span className="text-[10px] text-panel-text-dim font-mono">v1.0.0</span>
       </footer>
+
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        onClose={() => setPaletteOpen(false)}
+      />
     </div>
   )
 }

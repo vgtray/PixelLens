@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { isElementVisible, isPixelLensElement, getElementPath, getVisibleElements } from '../dom-utils';
+import { isElementVisible, isPixelLensElement, getVisibleElements } from '../dom-utils';
 
 function mockRect(el: Element, width: number, height: number) {
   vi.spyOn(el, 'getBoundingClientRect').mockReturnValue({
@@ -87,51 +87,6 @@ describe('isPixelLensElement', () => {
     expect(isPixelLensElement(el)).toBe(false);
   });
 });
-
-describe('getElementPath', () => {
-  beforeEach(() => {
-    document.body.innerHTML = '';
-  });
-
-  it('returns tag name for simple element', () => {
-    const el = document.createElement('div');
-    document.body.appendChild(el);
-    const path = getElementPath(el);
-    expect(path).toContain('div');
-  });
-
-  it('includes id when present and stops there', () => {
-    const parent = document.createElement('div');
-    parent.id = 'main';
-    const child = document.createElement('span');
-    parent.appendChild(child);
-    document.body.appendChild(parent);
-    const path = getElementPath(child);
-    expect(path).toContain('div#main');
-    expect(path).toContain('span');
-  });
-
-  it('includes class names', () => {
-    const el = document.createElement('div');
-    el.className = 'foo bar';
-    document.body.appendChild(el);
-    const path = getElementPath(el);
-    expect(path).toContain('.foo');
-    expect(path).toContain('.bar');
-  });
-
-  it('includes nth-of-type for siblings', () => {
-    const parent = document.createElement('div');
-    const child1 = document.createElement('span');
-    const child2 = document.createElement('span');
-    parent.appendChild(child1);
-    parent.appendChild(child2);
-    document.body.appendChild(parent);
-    const path = getElementPath(child2);
-    expect(path).toContain('nth-of-type(2)');
-  });
-});
-
 
 describe('getVisibleElements', () => {
   beforeEach(() => {

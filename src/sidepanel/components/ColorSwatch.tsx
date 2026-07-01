@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react'
 import { Check } from '@phosphor-icons/react'
 import gsap from 'gsap'
+import { prefersReducedMotion } from '../reducedMotion'
 import { copyToClipboard } from '@/lib/export'
 import { usePanelStore } from '../store'
 
@@ -51,7 +52,7 @@ function ColorSwatch({ color, size = 32, showLabel = false, format }: ColorSwatc
 
   const handleMouseEnter = useCallback(() => {
     setShowTooltip(true)
-    if (btnRef.current) {
+    if (btnRef.current && !prefersReducedMotion()) {
       gsap.to(btnRef.current, {
         scale: 1.15,
         duration: 0.25,
@@ -62,7 +63,7 @@ function ColorSwatch({ color, size = 32, showLabel = false, format }: ColorSwatc
 
   const handleMouseLeave = useCallback(() => {
     setShowTooltip(false)
-    if (btnRef.current) {
+    if (btnRef.current && !prefersReducedMotion()) {
       gsap.to(btnRef.current, {
         scale: 1,
         duration: 0.2,
@@ -85,6 +86,7 @@ function ColorSwatch({ color, size = 32, showLabel = false, format }: ColorSwatc
           backgroundColor: color,
           willChange: 'transform',
         }}
+        aria-label={`Copy color ${displayValue}`}
         title={displayValue}
       >
         {copied && (

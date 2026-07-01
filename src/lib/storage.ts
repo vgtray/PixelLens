@@ -80,6 +80,7 @@ export type PanelViewMode =
   | 'inspect'
   | 'scan'
   | 'design-system'
+  | 'contrast'
   | 'export'
   | 'history'
   | 'markdown'

@@ -9,23 +9,40 @@ import {
   GlobeHemisphereWest,
   CircleNotch,
   Check,
+  Sparkle,
 } from '@phosphor-icons/react'
 import { MessageType } from '@/types/messages'
 import { sendMessage } from '@/lib/messaging'
-import { setPanelInitialMode } from '@/lib/storage'
+import { setPanelInitialMode, getLatestDesignSystem } from '@/lib/storage'
+import { buildLlmBundle } from '@/lib/llm-bundle'
 import type { MarkdownResult } from '@/types/markdown'
+import PixelLensLogo from '@/sidepanel/components/PixelLensLogo'
 
 type InspectStatus = 'idle' | 'active' | 'unsupported'
 type MarkdownStatus = 'idle' | 'working' | 'done' | 'unsupported' | 'failed'
+
+function isMac(): boolean {
+  return typeof navigator !== 'undefined' && /Mac/i.test(navigator.userAgent)
+}
+
+// Fallback labels matching the manifest suggested_key (mac override included),
+// shown until chrome.commands.getAll() reports the real (possibly remapped) bindings.
+function defaultShortcuts() {
+  return isMac()
+    ? { inspect: '⌘⇧L', popup: '⌘⇧P' }
+    : { inspect: 'Ctrl+Shift+L', popup: 'Ctrl+Shift+P' }
+}
 
 export function Popup() {
   const [status, setStatus] = useState<InspectStatus>('idle')
   const [currentUrl, setCurrentUrl] = useState('')
   const [mdStatus, setMdStatus] = useState<MarkdownStatus>('idle')
+  const [llmStatus, setLlmStatus] = useState<MarkdownStatus>('idle')
   // The active tab id, captured on mount so the click handlers can call
   // chrome.sidePanel.open({ tabId }) synchronously — no awaited query is
   // allowed before the open() or Chrome drops the user gesture.
   const [tabId, setTabId] = useState<number | null>(null)
+  const [shortcuts, setShortcuts] = useState(defaultShortcuts)
 
   useEffect(() => {
     chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
@@ -37,6 +54,19 @@ export function Popup() {
           setCurrentUrl(tab.url)
         }
       }
+    })
+  }, [])
+
+  // Show the shortcuts actually bound (the user may remap them in
+  // chrome://extensions/shortcuts); fall back to the manifest defaults.
+  useEffect(() => {
+    chrome.commands?.getAll?.((cmds) => {
+      const find = (name: string) => cmds.find((c) => c.name === name)?.shortcut || ''
+      const fallback = defaultShortcuts()
+      setShortcuts({
+        inspect: find('toggle-inspect') || fallback.inspect,
+        popup: find('_execute_action') || fallback.popup,
+      })
     })
   }, [])
 
@@ -101,6 +131,32 @@ export function Popup() {
     }
   }
 
+  async function handleCopyLlm() {
+    if (llmStatus === 'working') return
+    setLlmStatus('working')
+    try {
+      const result: MarkdownResult | undefined = await sendMessage(
+        MessageType.EXTRACT_MARKDOWN,
+        undefined,
+      )
+      if (!result) {
+        // `undefined` = content script unreachable -> page not supported.
+        setLlmStatus('unsupported')
+        setTimeout(() => setLlmStatus('idle'), 2000)
+        return
+      }
+      // Fold in the last scan's design tokens when the user has scanned before;
+      // buildLlmBundle degrades gracefully to a "no scan yet" note otherwise.
+      const designSystem = await getLatestDesignSystem()
+      await navigator.clipboard.writeText(buildLlmBundle({ markdown: result, designSystem }))
+      setLlmStatus('done')
+      setTimeout(() => setLlmStatus('idle'), 1800)
+    } catch {
+      setLlmStatus('failed')
+      setTimeout(() => setLlmStatus('idle'), 2000)
+    }
+  }
+
   async function handleLastScan() {
     // Same gesture rule as handleScan: open synchronously here, never via a SW
     // message hop. App.tsx rebuilds the last design system from pixellens_scans
@@ -144,16 +200,23 @@ export function Popup() {
             ? 'Conversion failed'
             : 'Copy as Markdown'
 
+  const llmLabel =
+    llmStatus === 'working'
+      ? 'Bundling…'
+      : llmStatus === 'done'
+        ? 'Copied!'
+        : llmStatus === 'unsupported'
+          ? 'Page not supported'
+          : llmStatus === 'failed'
+            ? 'Copy failed'
+            : 'Copy for LLM'
+
   return (
     <div className="popup">
       {/* Header */}
       <header className="popup-header">
         <div className="popup-logo">
-          <svg width="20" height="20" viewBox="0 0 128 128" fill="none">
-            <circle cx="56" cy="56" r="24" stroke="#6366F1" strokeWidth="6" />
-            <line x1="73" y1="73" x2="100" y2="100" stroke="#6366F1" strokeWidth="6" strokeLinecap="round" />
-            <circle cx="56" cy="56" r="8" fill="#818CF8" />
-          </svg>
+          <PixelLensLogo size={20} />
           <span className="popup-title">PixelLens</span>
         </div>
         {currentUrl && (
@@ -218,6 +281,28 @@ export function Popup() {
           <span>{mdLabel}</span>
         </button>
 
+        <button
+          className="popup-btn"
+          onClick={handleCopyLlm}
+          disabled={llmStatus === 'working'}
+          style={
+            llmStatus === 'done'
+              ? { background: 'var(--color-success)', borderColor: 'var(--color-success)', color: '#fff' }
+              : llmStatus === 'working'
+                ? { opacity: 0.75 }
+                : undefined
+          }
+        >
+          {llmStatus === 'working' ? (
+            <CircleNotch size={18} weight="bold" className="animate-spin" />
+          ) : llmStatus === 'done' ? (
+            <Check size={18} weight="bold" />
+          ) : (
+            <Sparkle size={18} weight="fill" />
+          )}
+          <span>{llmLabel}</span>
+        </button>
+
         <button className="popup-btn" onClick={handleLastScan}>
           <ClockCounterClockwise size={18} weight="bold" />
           <span>Last scan</span>
@@ -232,17 +317,17 @@ export function Popup() {
         </div>
         <div className="popup-shortcut-row">
           <span>Toggle inspect</span>
-          <kbd>Ctrl+Shift+L</kbd>
+          <kbd>{shortcuts.inspect}</kbd>
         </div>
         <div className="popup-shortcut-row">
           <span>Open popup</span>
-          <kbd>Ctrl+Shift+P</kbd>
+          <kbd>{shortcuts.popup}</kbd>
         </div>
       </div>
 
       {/* Footer */}
       <footer className="popup-footer">
-        <button className="popup-footer-btn" title="Settings" onClick={handleSettings}>
+        <button className="popup-footer-btn" aria-label="Settings" title="Settings" onClick={handleSettings}>
           <GearSix size={16} weight="bold" />
         </button>
         <span className="popup-version">v1.0.0</span>

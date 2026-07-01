@@ -19,6 +19,7 @@ function ShadowPreview({ shadow }: ShadowPreviewProps) {
   return (
     <button
       onClick={handleClick}
+      aria-label={copied ? 'Copied' : `Copy shadow: ${shadow.value}`}
       className="flex flex-col items-center gap-2 p-3 rounded-lg bg-panel-bg border border-panel-border hover:border-panel-accent/40 transition-all duration-200 group"
     >
       {/* Shadow preview box */}
